@@ -6,10 +6,12 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 
 from .models import AnalysisError, Stock
 
-ACTIVE_STATUSES = ("running", "preparing", "pausing", "resetting")
+ACTIVE_STATUSES = ("running", "preparing", "pausing", "stopping", "resetting")
+LEGACY_STATUSES = {"resetting": "stopping", "reset": "stopped"}
 
 
 class JobManager:
@@ -24,7 +26,7 @@ class JobManager:
             try:
                 for job in self.jobs.values():
                     if job["status"] in ACTIVE_STATUSES:
-                        job["status"] = "reset" if self.engine.store.get(f"reset:{job['id']}") else "paused"
+                        job["status"] = "stopped" if self._stop_requested(job["id"]) else "paused"
                         self._save(job)
             finally:
                 self._release()
@@ -52,6 +54,16 @@ class JobManager:
             self._release()
             return False
 
+    @contextmanager
+    def _history_guard(self):
+        # 网页与 CLI 恢复任务时共用短锁，避免刚删除的暂停任务被并发恢复。
+        with (self.engine.directory / "history.lock").open("a+") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
     def _configuration(self):
         # 凭据可更换；同一任务的指标、模型、过滤与聚合口径不能中途改变。
         raw = self.engine.settings.model_dump(mode="json", exclude={"jev_api_key", "tushare_token", "language", "request_timeout", "request_interval"})
@@ -61,7 +73,11 @@ class JobManager:
         job = self.engine.store.job(identifier)
         if not job:
             raise AnalysisError("job_missing", "找不到扫描任务。", "Scan job not found.")
-        return job
+        return {**job, "status": LEGACY_STATUSES.get(job["status"], job["status"])}
+
+    def _stop_requested(self, identifier):
+        # 兼容旧版本的重置标记，历史任务不需要重写或重新执行。
+        return self.engine.store.get(f"stop:{identifier}") or self.engine.store.get(f"reset:{identifier}")
 
     def _save(self, job):
         job["updated"] = time.time()
@@ -74,6 +90,7 @@ class JobManager:
             return jobs[:50] + [job for job in jobs[50:] if job["status"] in ACTIVE_STATUSES]
 
     def search(self, scope="all", status="all", page=0, limit=20):
+        status = LEGACY_STATUSES.get(status, status)
         with self.lock:
             jobs = [self.summary(job) for job in self.engine.store.jobs(limit=-1) if scope == "all" or job["scope"] == scope]
             matches = [job for job in jobs if status == "all" or job["status"] == status]
@@ -83,8 +100,9 @@ class JobManager:
 
     def summary(self, job):
         rows = job.get("items", [])
-        if self.engine.store.get(f"reset:{job['id']}"):
-            job = {**job, "status": "resetting" if job["status"] in ACTIVE_STATUSES else "reset"}
+        job = {**job, "status": LEGACY_STATUSES.get(job["status"], job["status"])}
+        if self._stop_requested(job["id"]):
+            job = {**job, "status": "stopping" if job["status"] in ACTIVE_STATUSES else "stopped"}
         elif job["status"] in ("running", "preparing") and self.engine.store.get(f"pause:{job['id']}"):
             job = {**job, "status": "pausing"}
         return {**{key: value for key, value in job.items() if key not in ("items", "sessions")}, "total": len(rows), "downloaded": sum(item["data_status"] != "pending" for item in rows), "completed": sum(item["status"] == "ready" for item in rows), "failed": sum(item["status"] == "failed" for item in rows), "skipped": sum(item["status"] == "skipped" for item in rows), "remaining": sum(item["status"] == "pending" for item in rows)}
@@ -92,7 +110,21 @@ class JobManager:
     def get(self, identifier):
         with self.lock:
             job = self._read(identifier)
-            return {**self.summary(job), "items": job.get("items", [])}
+            deleted = self.engine.store.deleted_ids("analysis")
+            items = [{**item, "analysis_id": None, "analysis_deleted": True} if item.get("analysis_id") in deleted else item for item in job.get("items", [])]
+            return {**self.summary(job), "items": items}
+
+    def delete(self, identifiers):
+        with self.lock, self._history_guard():
+            for identifier in identifiers:
+                job = self._read(identifier)
+                if identifier == self.active or self.summary(job)["status"] in ACTIVE_STATUSES:
+                    raise AnalysisError("job_active", "请先暂停或中止选中的运行任务，再删除扫描记录。", "Pause or stop the selected running tasks before deleting their records.")
+            return self.engine.store.delete_records("job", identifiers)
+
+    def restore(self, token):
+        with self.lock, self._history_guard():
+            return self.engine.store.restore_records("job", token)
 
     def start(self, symbols: list[str] | None = None) -> dict:
         if not self.engine.settings.jev_api_key.get_secret_value():
@@ -119,10 +151,10 @@ class JobManager:
             return self.summary(job)
 
     def resume(self, identifier, retry_failed=False):
-        with self.lock:
+        with self.lock, self._history_guard():
             job = self._read(identifier)
-            if job["status"] == "reset" or self.engine.store.get(f"reset:{identifier}"):
-                raise AnalysisError("job_reset", "该任务已重置，请开始新的扫描。", "This job was reset. Start a new scan.")
+            if job["status"] in ("stopping", "stopped") or self._stop_requested(identifier):
+                raise AnalysisError("job_stopped", "该任务已中止或正在中止，不能继续或重试。请开始新的扫描。", "This job is stopped or stopping and cannot be resumed or retried. Start a new scan.")
             if job.get("configuration") != self._configuration():
                 raise AnalysisError("job_config_changed", "分析配置已变化，请新建扫描任务。", "Analysis configuration changed; start a new scan.")
             if not self.engine.settings.jev_api_key.get_secret_value():
@@ -142,24 +174,30 @@ class JobManager:
             self.thread.start()
             return self.summary(job)
 
-    def reset(self, identifier):
-        with self.lock:
+    def stop(self, identifier):
+        with self.lock, self._history_guard():
             job = self._read(identifier)
+            if job["status"] in ("completed", "partial", "failed", "stopped"):
+                return self.summary(job)
             # 只写控制标记，不覆盖其他进程正在保存的进度；保留历史分析与行情缓存。
-            self.engine.store.put(f"reset:{identifier}", True)
+            self.engine.store.put(f"stop:{identifier}", True)
             if not self.active and self._acquire():
                 try:
                     job = self._read(identifier)
-                    job["status"] = "reset"
+                    job["status"] = "stopped"
                     self._save(job)
                 finally:
                     self._release()
             return self.summary(job)
 
+    def reset(self, identifier):
+        # 旧调用方仍可使用 reset；所有新界面和状态统一为中止。
+        return self.stop(identifier)
+
     def _paused(self, job):
         with self.lock:
-            if self.engine.store.get(f"reset:{job['id']}"):
-                job["status"] = "reset"
+            if self._stop_requested(job["id"]):
+                job["status"] = "stopped"
                 self._save(job)
                 return True
             if job["status"] == "pausing" or self.engine.store.get(f"pause:{job['id']}"):

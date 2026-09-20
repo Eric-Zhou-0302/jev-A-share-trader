@@ -5,7 +5,7 @@ export interface ScanTaskView { filter: string; page: number }
 export interface HistoryView { query: string; fromDate: string; toDate: string; page: number }
 export type SourceRoute = { page: 'workbench'; symbol: string } | { page: 'scans'; view: ScanView } | { page: 'scanHistory'; view: ScanHistoryView } | { page: 'history'; view: HistoryView } | { page: 'scanTask'; id: string; view: ScanTaskView; from: string }
 export type Route = SourceRoute | { page: 'report'; id: string; from: string }
-export const jobStatuses = ['preparing', 'running', 'pausing', 'paused', 'completed', 'partial', 'failed', 'resetting', 'reset']
+export const jobStatuses = ['preparing', 'running', 'pausing', 'paused', 'completed', 'partial', 'failed', 'stopping', 'stopped']
 const filters = ['all', 'ready', 'failed', 'skipped', 'pending']
 const pageNumber = (value: string | null) => /^\d{1,6}$/.test(value ?? '') ? Math.max(0, Number(value)) : 0
 const dateValue = (value: string | null) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? value! : ''
@@ -27,6 +27,9 @@ export function parseRoute(hash: string): Route {
     if (id && validId(id)) return { page: 'scanTask', id, view: taskView(params), from: scanHref(view) }
     return { page: 'scans', view }
   }
+  // 旧书签中的重置筛选仍对应同一批已中止任务。
+  if (params.get('status') === 'reset') params.set('status', 'stopped')
+  if (params.get('status') === 'resetting') params.set('status', 'stopping')
   if (path === '/scan-history') return { page: 'scanHistory', view: { scope: ['market', 'watchlist'].includes(params.get('scope') ?? '') ? params.get('scope') as ScanScope : 'all', status: jobStatuses.includes(params.get('status') ?? '') ? params.get('status')! : 'all', page: pageNumber(params.get('page')) } }
   if (path?.startsWith('/scans/')) {
     const id = path.slice('/scans/'.length)

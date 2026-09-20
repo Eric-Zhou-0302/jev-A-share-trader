@@ -160,11 +160,11 @@ def test_pause_during_model_call_finishes_only_current_stock(engine, monkeypatch
     assert len(calls) == len(symbols)
 
 
-@pytest.mark.parametrize("stage", ["data", "analysis"])
-def test_reset_running_job_across_managers_stops_after_current_stock(engine, monkeypatch, stage):
+@pytest.mark.parametrize("stage", ["preparing", "data", "analysis"])
+def test_stop_running_job_across_managers_stops_after_current_stock(engine, monkeypatch, stage):
     calls = enable_model(engine)
     entered, release = threading.Event(), threading.Event()
-    target, method = (engine.provider, "bars") if stage == "data" else (engine.client, "evaluate")
+    target, method = {"preparing": (engine, "context"), "data": (engine.provider, "bars"), "analysis": (engine.client, "evaluate")}[stage]
     original = getattr(target, method)
 
     def blocking(*args):
@@ -178,7 +178,7 @@ def test_reset_running_job_across_managers_stops_after_current_stock(engine, mon
     second = JobManager(engine)
     try:
         assert entered.wait(timeout=5)
-        assert second.reset(job["id"])["status"] == "resetting"
+        assert second.stop(job["id"])["status"] == "stopping"
         assert second.is_running()
         with pytest.raises(AnalysisError) as exc:
             second.start()
@@ -187,10 +187,12 @@ def test_reset_running_job_across_managers_stops_after_current_stock(engine, mon
         release.set()
     finish(first)
     result = second.get(job["id"])
-    assert result["status"] == "reset" and not second.is_running()
+    assert result["status"] == "stopped" and not second.is_running()
     assert result["completed"] == (1 if stage == "analysis" else 0)
     assert len(calls) == (1 if stage == "analysis" else 0)
-    if stage == "data":
+    if stage == "preparing":
+        assert result["total"] == 0 and engine.provider.calls == 0
+    elif stage == "data":
         assert result["downloaded"] == 1 and engine.provider.calls == 1
     else:
         analysis_id = result["items"][0]["analysis_id"]
@@ -198,24 +200,25 @@ def test_reset_running_job_across_managers_stops_after_current_stock(engine, mon
     for retry in (False, True):
         with pytest.raises(AnalysisError) as exc:
             second.resume(job["id"], retry_failed=retry)
-        assert exc.value.code == "job_reset"
+        assert exc.value.code == "job_stopped"
     fresh = second.start(["600000.SH"])
     finish(second)
     assert fresh["id"] != job["id"] and second.get(fresh["id"])["completed"] == 1
     assert second.get(job["id"])["items"] == result["items"]
 
 
-def test_reset_completed_job_preserves_history_and_cache_across_restart(engine):
+def test_stop_completed_job_is_a_noop_and_preserves_history_and_cache(engine):
     calls = enable_model(engine)
     manager = JobManager(engine)
     job = manager.start(["000001.SZ"])
     finish(manager)
     before = manager.get(job["id"])
     engine.store.put("test-cache-preserved", {"value": 1})
-    assert manager.reset(job["id"])["status"] == "reset"
+    assert manager.stop(job["id"]) == {key: value for key, value in before.items() if key != "items"}
+    assert not engine.store.get(f"stop:{job['id']}")
     restarted = JobManager(engine)
     after = restarted.get(job["id"])
-    assert after["status"] == "reset" and after["items"] == before["items"]
+    assert after == before
     assert engine.store.get("test-cache-preserved") == {"value": 1}
     assert engine.store.analysis(after["items"][0]["analysis_id"])["status"] == "ready"
     fresh = restarted.start(["000001.SZ"])
@@ -223,7 +226,8 @@ def test_reset_completed_job_preserves_history_and_cache_across_restart(engine):
     assert restarted.get(fresh["id"])["completed"] == 1 and len(calls) == 1
 
 
-def test_reset_pending_at_process_exit_is_recovered_as_reset(engine):
+@pytest.mark.parametrize("flag", ["stop", "reset"])
+def test_stop_pending_at_process_exit_is_recovered_as_stopped(engine, flag):
     enable_model(engine)
     manager = JobManager(engine)
     job = manager.start(["000001.SZ"])
@@ -231,13 +235,14 @@ def test_reset_pending_at_process_exit_is_recovered_as_reset(engine):
     stored = engine.store.job(job["id"])
     stored["status"] = "running"
     engine.store.save_job(stored)
-    engine.store.put(f"reset:{job['id']}", True)
+    engine.store.put(f"{flag}:{job['id']}", True)
     restarted = JobManager(engine)
-    assert restarted.get(job["id"])["status"] == "reset"
+    assert restarted.get(job["id"])["status"] == "stopped"
     assert not restarted.is_running()
 
 
-def test_reset_route_preserves_job_and_blocks_resume(engine):
+@pytest.mark.parametrize("operation", ["stop", "reset"])
+def test_stop_route_preserves_paused_job_and_blocks_resume(engine, operation):
     from fastapi.testclient import TestClient
 
     from jev_trader.api import create_app
@@ -247,10 +252,29 @@ def test_reset_route_preserves_job_and_blocks_resume(engine):
     with TestClient(app) as client:
         job = app.state.jobs.start(["000001.SZ"])
         finish(app.state.jobs)
-        response = client.post(f"/api/jobs/{job['id']}/reset", json={})
-        assert response.status_code == 200 and response.json()["status"] == "reset"
+        saved = engine.store.job(job["id"])
+        saved["status"] = "paused"
+        engine.store.save_job(saved)
+        engine.store.put(f"pause:{job['id']}", True)
+        response = client.post(f"/api/jobs/{job['id']}/{operation}", json={})
+        assert response.status_code == 200 and response.json()["status"] == "stopped"
         detail = client.get(f"/api/jobs/{job['id']}").json()
         assert detail["completed"] == 1 and detail["items"][0]["analysis_id"]
-        assert client.get("/api/jobs").json()[0]["status"] == "reset"
-        assert client.post(f"/api/jobs/{job['id']}/resume", json={}).json()["code"] == "job_reset"
-        assert client.post("/api/jobs/missing/reset", json={}).json()["code"] == "job_missing"
+        assert client.get("/api/jobs").json()[0]["status"] == "stopped"
+        assert client.post(f"/api/jobs/{job['id']}/resume", json={}).json()["code"] == "job_stopped"
+        assert client.post(f"/api/jobs/{job['id']}/retry", json={}).json()["code"] == "job_stopped"
+        assert client.post(f"/api/jobs/{job['id']}/stop", json={}).json()["status"] == "stopped"
+        assert client.post("/api/jobs/missing/stop", json={}).json()["code"] == "job_missing"
+
+
+@pytest.mark.parametrize("status", ["reset", "stopped"])
+def test_stopped_history_without_control_flag_remains_terminal(engine, status):
+    manager = JobManager(engine)
+    engine.store.save_job({"id": "old-stopped", "created": 1, "status": status, "scope": "market", "items": []})
+    assert manager.get("old-stopped")["status"] == "stopped"
+    assert manager.search(status="stopped")["total"] == 1
+    assert manager.search(status="reset")["items"][0]["status"] == "stopped"
+    assert manager.stop("old-stopped")["status"] == "stopped"
+    with pytest.raises(AnalysisError) as exc:
+        manager.resume("old-stopped")
+    assert exc.value.code == "job_stopped"

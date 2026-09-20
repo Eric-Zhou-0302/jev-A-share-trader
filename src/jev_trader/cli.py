@@ -128,7 +128,7 @@ def main():
                 while manager.active:
                     time.sleep(.2)
             final = manager.get(job["id"])
-            statuses = {"completed": "已完成", "partial": "部分完成", "paused": "已暂停", "failed": "失败"}
+            statuses = {"completed": "已完成", "partial": "部分完成", "paused": "已暂停", "failed": "失败", "stopped": "已中止"}
             print(statuses.get(final["status"], final["status"]) if args.lang == "zh" else final["status"])
             if final.get("error"):
                 print(final["error"][args.lang])

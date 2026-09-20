@@ -121,7 +121,7 @@ class Engine:
         digest = hashlib.sha256(json.dumps(signature, sort_keys=True, allow_nan=False).encode()).hexdigest()
         if not technical_only and self.settings.jev_api_key.get_secret_value():
             saved = self.store.get(f"decision:{digest}", max_age=86400)
-            if saved:
+            if saved and self.store.analysis(saved["id"]):
                 return Analysis.model_validate(saved).model_copy(update={"cached": True})
         # 缓存命中可复用原报告；实际重新计算时创建独立快照，不能覆盖历史报告。
         result = Analysis(id=uuid.uuid4().hex, symbol=stock.symbol, name=stock.name, market=stock.market,

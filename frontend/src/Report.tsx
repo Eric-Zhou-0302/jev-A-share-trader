@@ -20,7 +20,7 @@ export default function Report({ id, lang, initial, busy, returnLabel, onBack, o
     setLoading(true); setError('')
     async function load() {
       try {
-        const saved = initial?.id === id ? initial : await api<Analysis>(`/analyses/${encodeURIComponent(id)}`, lang, undefined, 'GET', controller.signal)
+        const saved = await api<Analysis>(`/analyses/${encodeURIComponent(id)}`, lang, undefined, 'GET', controller.signal)
         if (!controller.signal.aborted) { setReport(saved); onLoaded(saved) }
       } catch (value) { if (!controller.signal.aborted) { setReport(null); setError((value as Error).message) } }
       finally { if (!controller.signal.aborted) setLoading(false) }

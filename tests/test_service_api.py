@@ -230,6 +230,7 @@ def test_scan_history_filters_pages_and_preserves_older_tasks_without_running_th
         assert all("items" not in job for job in history["items"])
         assert client.get("/api/jobs/archived-000").json()["status"] == "completed"
         assert client.get("/api/jobs/search?status=reset").json()["items"][0]["id"] == "archived-064"
+        assert client.get("/api/jobs/search?status=stopped").json()["items"][0]["status"] == "stopped"
         assert client.get("/api/jobs/search?status=paused").json()["total"] == 1
         assert client.get("/api/jobs/search?scope=market&status=paused&page=99").json() == {"items": [], "total": 0, "page": 0, "limit": 20}
         assert client.get("/api/jobs/search?page=999&limit=20").json()["page"] == 3

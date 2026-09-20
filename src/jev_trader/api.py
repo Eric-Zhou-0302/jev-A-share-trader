@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +32,14 @@ class ScanInput(BaseModel):
 
 class WatchInput(BaseModel):
     symbol: str
+
+
+class DeleteInput(BaseModel):
+    ids: list[Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]] = Field(min_length=1, max_length=100)
+
+
+class RestoreInput(BaseModel):
+    token: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]+$")
 
 
 class ConfigInput(BaseModel):
@@ -176,6 +184,16 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
             raise AnalysisError("analysis_missing", "找不到分析记录。", "Analysis not found.")
         return saved
 
+    @app.post("/api/analyses/delete")
+    def delete_analyses(body: DeleteInput):
+        with engine.analysis_lock:
+            return engine.store.delete_records("analysis", body.ids)
+
+    @app.post("/api/analyses/restore")
+    def restore_analyses(body: RestoreInput):
+        with engine.analysis_lock:
+            return engine.store.restore_records("analysis", body.token)
+
     @app.get("/api/analyses/{identifier}/export")
     def export(identifier: str, format: Literal["json", "csv", "html"] = "html", lang: Literal["zh", "en"] = "zh"):
         saved = analysis(identifier)
@@ -197,7 +215,7 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
 
     @app.get("/api/jobs/search")
     def scan_history(scope: Literal["all", "market", "watchlist"] = "all",
-                     status: Literal["all", "preparing", "running", "pausing", "paused", "completed", "partial", "failed", "resetting", "reset"] = "all",
+                     status: Literal["all", "preparing", "running", "pausing", "paused", "completed", "partial", "failed", "stopping", "stopped", "resetting", "reset"] = "all",
                      page: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100)):
         return manager.search(scope, status, page, limit)
 
@@ -205,11 +223,19 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
     def job(identifier: str):
         return manager.get(identifier)
 
+    @app.post("/api/jobs/delete")
+    def delete_jobs(body: DeleteInput):
+        return manager.delete(body.ids)
+
+    @app.post("/api/jobs/restore")
+    def restore_jobs(body: RestoreInput):
+        return manager.restore(body.token)
+
     @app.post("/api/jobs/{identifier}/{operation}")
-    def control_job(identifier: str, operation: Literal["pause", "resume", "retry", "reset"]):
+    def control_job(identifier: str, operation: Literal["pause", "resume", "retry", "stop", "reset"]):
         manager.get(identifier)
-        if operation == "reset":
-            return manager.reset(identifier)
+        if operation in ("stop", "reset"):
+            return manager.stop(identifier)
         return manager.pause(identifier) if operation == "pause" else manager.resume(identifier, retry_failed=operation == "retry")
 
     web = Path(__file__).parent / "web"

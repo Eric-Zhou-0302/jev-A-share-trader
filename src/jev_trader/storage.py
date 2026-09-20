@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 import zlib
 from contextlib import contextmanager
 from pathlib import Path
+
+from .models import AnalysisError
 
 
 class Store:
@@ -21,6 +24,7 @@ class Store:
                 CREATE TABLE IF NOT EXISTS analysis_summaries (id TEXT PRIMARY KEY, value BLOB NOT NULL);
                 CREATE TABLE IF NOT EXISTS watchlist (symbol TEXT PRIMARY KEY, name TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, created REAL, value BLOB NOT NULL);
+                CREATE TABLE IF NOT EXISTS deleted_records (kind TEXT, id TEXT, token TEXT NOT NULL, deleted REAL, PRIMARY KEY(kind,id));
             """)
 
     @contextmanager
@@ -59,12 +63,12 @@ class Store:
 
     def analysis(self, identifier: str) -> dict | None:
         with self.connect() as db:
-            row = db.execute("SELECT value FROM analyses WHERE id=?", (identifier,)).fetchone()
+            row = db.execute("SELECT value FROM analyses WHERE id=? AND id NOT IN (SELECT id FROM deleted_records WHERE kind='analysis')", (identifier,)).fetchone()
         return self.unpack(row[0]) if row else None
 
     def history(self, symbol: str | None = None, limit: int = 100) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT value FROM analyses " + ("WHERE symbol=? " if symbol else "") + "ORDER BY created DESC LIMIT ?", ((symbol, limit) if symbol else (limit,))).fetchall()
+            rows = db.execute("SELECT value FROM analyses WHERE id NOT IN (SELECT id FROM deleted_records WHERE kind='analysis') " + ("AND symbol=? " if symbol else "") + "ORDER BY created DESC LIMIT ?", ((symbol, limit) if symbol else (limit,))).fetchall()
         return [self.unpack(row[0]) for row in rows]
 
     def watchlist(self) -> list[dict]:
@@ -75,7 +79,7 @@ class Store:
     def summaries(self, symbol: str | None = None, limit: int = 100) -> list[dict]:
         # 列表不读取数万点图表数据；旧记录仅在首次读取时补齐摘要。
         with self.connect() as db:
-            rows = db.execute("SELECT a.id, s.value FROM analyses a LEFT JOIN analysis_summaries s ON s.id=a.id " + ("WHERE a.symbol=? " if symbol else "") + "ORDER BY a.created DESC LIMIT ?", ((symbol, limit) if symbol else (limit,))).fetchall()
+            rows = db.execute("SELECT a.id, s.value FROM analyses a LEFT JOIN analysis_summaries s ON s.id=a.id WHERE a.id NOT IN (SELECT id FROM deleted_records WHERE kind='analysis') " + ("AND a.symbol=? " if symbol else "") + "ORDER BY a.created DESC LIMIT ?", ((symbol, limit) if symbol else (limit,))).fetchall()
             results = []
             for identifier, summary in rows:
                 if summary is None:
@@ -109,10 +113,33 @@ class Store:
 
     def jobs(self, limit=50) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT value FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
+            rows = db.execute("SELECT value FROM jobs WHERE id NOT IN (SELECT id FROM deleted_records WHERE kind='job') ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
         return [self.unpack(row[0]) for row in rows]
 
     def job(self, identifier: str) -> dict | None:
         with self.connect() as db:
-            row = db.execute("SELECT value FROM jobs WHERE id=?", (identifier,)).fetchone()
+            row = db.execute("SELECT value FROM jobs WHERE id=? AND id NOT IN (SELECT id FROM deleted_records WHERE kind='job')", (identifier,)).fetchone()
         return self.unpack(row[0]) if row else None
+
+    def deleted_ids(self, kind: str) -> set[str]:
+        with self.connect() as db:
+            return {row[0] for row in db.execute("SELECT id FROM deleted_records WHERE kind=?", (kind,))}
+
+    def delete_records(self, kind: str, identifiers: list[str]) -> dict:
+        table = {"analysis": "analyses", "job": "jobs"}[kind]
+        identifiers = list(dict.fromkeys(identifiers))
+        token = uuid.uuid4().hex
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for identifier in identifiers:
+                if not db.execute(f"SELECT 1 FROM {table} WHERE id=?", (identifier,)).fetchone():
+                    raise AnalysisError("record_missing", "记录已不存在，请刷新列表。", "A record no longer exists. Refresh the list.")
+            # 标记独立于记录快照，缓存和晚到的任务写入不能使已删除记录重新出现。
+            db.executemany("INSERT OR REPLACE INTO deleted_records VALUES(?,?,?,?)", [(kind, identifier, token, time.time()) for identifier in identifiers])
+        return {"token": token, "count": len(identifiers)}
+
+    def restore_records(self, kind: str, token: str) -> dict:
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            count = db.execute("DELETE FROM deleted_records WHERE kind=? AND token=?", (kind, token)).rowcount
+        return {"count": count}

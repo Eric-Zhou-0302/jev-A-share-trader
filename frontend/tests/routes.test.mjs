@@ -50,3 +50,11 @@ test('stock entry remains distinct from a report and can be prefilled', () => {
   assert.deepEqual(parseRoute(analysisHref('000001.SZ')), { page: 'workbench', symbol: '000001.SZ' })
   assert.deepEqual(parseRoute('#/analysis'), { page: 'workbench', symbol: '' })
 })
+
+test('legacy reset history bookmarks select the equivalent stop status', () => {
+  for (const [legacy, current] of [['reset', 'stopped'], ['resetting', 'stopping']]) {
+    const route = parseRoute(`#/scan-history?scope=market&status=${legacy}&page=2`)
+    assert.deepEqual(route.view, { scope: 'market', status: current, page: 2 })
+    assert.deepEqual(parseRoute(scanHistoryHref(route.view)), route)
+  }
+})

@@ -21,13 +21,14 @@ export default function ScanTask({ id, from, lang, view, returnLabel, onBack, on
   const [pollError, setPollError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [confirmReset, setConfirmReset] = useState(false)
-  const resetDialog = useRef<HTMLDialogElement>(null)
+  const [confirmStop, setConfirmStop] = useState(false)
+  const stopDialog = useRef<HTMLDialogElement>(null)
+  const cancelStopButton = useRef<HTMLButtonElement>(null)
   const mounted = useRef(true)
   const revision = useRef(0)
   const t = (key: Key) => translate(lang, key)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  useEffect(() => { if (confirmReset) resetDialog.current?.showModal() }, [confirmReset])
+  useEffect(() => { if (confirmStop) { stopDialog.current?.showModal(); cancelStopButton.current?.focus() } }, [confirmStop])
   useEffect(() => { if (!loading) onReady() }, [loading, onReady])
   useEffect(() => {
     if (busy) return
@@ -50,10 +51,10 @@ export default function ScanTask({ id, from, lang, view, returnLabel, onBack, on
     return () => { controller.abort(); window.clearTimeout(timer) }
   }, [id, lang, busy])
 
-  async function control(operation: 'pause' | 'resume' | 'retry' | 'reset') {
+  async function control(operation: 'pause' | 'resume' | 'retry' | 'stop') {
     if (!detail || busy) return
     revision.current += 1
-    setBusy(true); setError(''); setConfirmReset(false)
+    setBusy(true); setError(''); setConfirmStop(false)
     try {
       const job = await api<Job>(`/jobs/${id}/${operation}`, lang, {})
       if (mounted.current) {
@@ -65,7 +66,7 @@ export default function ScanTask({ id, from, lang, view, returnLabel, onBack, on
   }
   const active = jobs.find(job => activeStatuses.includes(job.status))
   const isActive = detail && activeStatuses.includes(detail.status)
-  const isReset = detail?.status === 'reset' || detail?.status === 'resetting'
+  const isStopped = detail?.status === 'stopped' || detail?.status === 'stopping'
   const filtered = detail?.items?.filter(item => view.filter === 'all' || item.status === view.filter) ?? []
   const pages = Math.max(1, Math.ceil(filtered.length / 100))
   const currentPage = Math.min(view.page, pages - 1)
@@ -77,14 +78,14 @@ export default function ScanTask({ id, from, lang, view, returnLabel, onBack, on
     {active && active.id !== id && <div className="scan-active-note"><span>{t('otherScanActive')}</span><NavigationLink href={scanTaskHref(active.id, undefined, from)} onOpen={() => onTask(active.id, from)}>{t('viewActiveScan')} →</NavigationLink></div>}
     {loading ? <div className="empty-panel" role="status"><LoaderCircle size={30} className="spin"/><p>{t('loading')}</p></div> : detail && <>
       <section className="panel scan-status"><div className="panel-heading"><div><span className="eyebrow">{detail.as_of ?? '—'}</span><h3>{t('progress')} <span className="subtle-badge">{t(detail.status as Key) ?? detail.status}</span></h3></div><div className="heading-actions">
-        {!isReset && <button className="button secondary" disabled={busy} onClick={() => setConfirmReset(true)}><Square size={14}/>{t('resetScan')}</button>}
-        {isActive ? !isReset && <button className="button secondary" disabled={busy || detail.status === 'pausing'} onClick={() => control('pause')}><Pause size={14}/>{t('pause')}</button> : !isReset && <><button className="button secondary" disabled={busy || !!active || !!pollError || detail.failed === 0} onClick={() => control('retry')}><RotateCcw size={14}/>{t('retry')}</button>{(detail.remaining > 0 || detail.status === 'paused') && <button className="button primary" disabled={busy || !!active || !!pollError} onClick={() => control('resume')}><Play size={14}/>{t('resume')}</button>}</>}
+        {detail.status !== 'completed' && detail.status !== 'partial' && detail.status !== 'failed' && !isStopped && <button className="button secondary" disabled={busy} onClick={() => setConfirmStop(true)}><Square size={14}/>{t('stopScan')}</button>}
+        {isActive ? !isStopped && <button className="button secondary" disabled={busy || detail.status === 'pausing'} onClick={() => control('pause')}><Pause size={14}/>{t('pause')}</button> : !isStopped && detail.status !== 'completed' && <><button className="button secondary" disabled={busy || !!active || !!pollError || detail.failed === 0} onClick={() => control('retry')}><RotateCcw size={14}/>{t('retry')}</button>{(detail.remaining > 0 || detail.status === 'paused') && <button className="button primary" disabled={busy || !!active || !!pollError} onClick={() => control('resume')}><Play size={14}/>{t('resume')}</button>}</>}
       </div></div><div className="progress-label"><span>{t(detail.phase === 'preparing' ? 'preparing' : detail.phase === 'data' ? 'dataProgress' : 'analysisProgress')}</span><strong>{jobProgress(detail).toFixed(0)}%</strong></div><div className="progress-track"><span style={{ width: `${jobProgress(detail)}%` }}/></div>
         <div className="scan-counters">{([['ready', detail.completed], ['failed', detail.failed], ['skipped', detail.skipped], ['pending', detail.remaining]] as const).map(([label, value]) => <div key={label}><span>{t(label)}</span><strong>{value.toLocaleString()}</strong></div>)}</div>
-        {detail.error && <p className="error-message">{detail.error[lang]}</p>}{detail.status === 'pausing' && <p>{t('pauseHint')}</p>}{detail.status === 'resetting' && <p>{t('resetHint')}</p>}{detail.status === 'reset' && <p>{t('scanResetDetail')}</p>}
+        {detail.error && <p className="error-message">{detail.error[lang]}</p>}{detail.status === 'pausing' && <p>{t('pauseHint')}</p>}{detail.status === 'stopping' && <p>{t('stopHint')}</p>}{detail.status === 'stopped' && <p>{t('scanStoppedDetail')}</p>}
       </section>
-      <section className="panel"><div className="panel-heading"><h3>{t('result')}</h3><select aria-label={t('filters')} value={view.filter} onChange={event => onChange({ filter: event.target.value, page: 0 })}>{['all', 'ready', 'failed', 'skipped', 'pending'].map(value => <option value={value} key={value}>{t(value as Key)}</option>)}</select></div><div className="table-scroll"><table><thead><tr><th>{t('stock')}</th><th>{t('result')}</th><th>{t('details')}</th></tr></thead><tbody>{filtered.slice(currentPage * 100, (currentPage + 1) * 100).map(item => <tr key={item.stock.symbol}><td><strong>{item.stock.name}</strong><small>{item.stock.symbol}</small></td><td>{item.action ? <span className={`action-badge ${item.action}`}>{t(item.action)}</span> : t(item.status as Key)}{item.horizon && <small>{item.horizon} {t('sessions')}</small>}</td><td>{item.analysis_id ? <ReportLink id={item.analysis_id} from={reportSource} onOpen={() => onOpen(item.analysis_id!, reportSource)}>{t('viewReport')} →</ReportLink> : item.error?.[lang] ?? '—'}</td></tr>)}</tbody></table>{!filtered.length && <p className="scan-empty-results">{t('noScanResults')}</p>}</div><div className="pagination"><button className="button secondary" disabled={currentPage === 0} onClick={() => onChange({ ...view, page: currentPage - 1 })}>{t('previousPage')}</button><span>{currentPage + 1} / {pages} · {filtered.length}</span><button className="button secondary" disabled={currentPage + 1 >= pages} onClick={() => onChange({ ...view, page: currentPage + 1 })}>{t('nextPage')}</button></div></section>
+      <section className="panel"><div className="panel-heading"><h3>{t('result')}</h3><select aria-label={t('filters')} value={view.filter} onChange={event => onChange({ filter: event.target.value, page: 0 })}>{['all', 'ready', 'failed', 'skipped', 'pending'].map(value => <option value={value} key={value}>{t(value as Key)}</option>)}</select></div><div className="table-scroll"><table><thead><tr><th>{t('stock')}</th><th>{t('result')}</th><th>{t('details')}</th></tr></thead><tbody>{filtered.slice(currentPage * 100, (currentPage + 1) * 100).map(item => <tr key={item.stock.symbol}><td><strong>{item.stock.name}</strong><small>{item.stock.symbol}</small></td><td>{item.action ? <span className={`action-badge ${item.action}`}>{t(item.action)}</span> : t(item.status as Key)}{item.horizon && <small>{item.horizon} {t('sessions')}</small>}</td><td>{item.analysis_id ? <ReportLink id={item.analysis_id} from={reportSource} onOpen={() => onOpen(item.analysis_id!, reportSource)}>{t('viewReport')} →</ReportLink> : item.analysis_deleted ? t('reportDeleted') : item.error?.[lang] ?? '—'}</td></tr>)}</tbody></table>{!filtered.length && <p className="scan-empty-results">{t('noScanResults')}</p>}</div><div className="pagination"><button className="button secondary" disabled={currentPage === 0} onClick={() => onChange({ ...view, page: currentPage - 1 })}>{t('previousPage')}</button><span>{currentPage + 1} / {pages} · {filtered.length}</span><button className="button secondary" disabled={currentPage + 1 >= pages} onClick={() => onChange({ ...view, page: currentPage + 1 })}>{t('nextPage')}</button></div></section>
     </>}
-    {confirmReset && <dialog ref={resetDialog} className="settings-dialog reset-dialog" onCancel={() => setConfirmReset(false)} aria-labelledby="reset-title" aria-describedby="reset-description"><div className="dialog-heading"><h2 id="reset-title">{t('resetTitle')}</h2><button className="icon-button" aria-label={t('close')} onClick={() => setConfirmReset(false)}><X size={20}/></button></div><p id="reset-description">{t('resetDescription')}</p><div className="heading-actions"><button className="button secondary" autoFocus onClick={() => setConfirmReset(false)}>{t('cancel')}</button><button className="button primary" onClick={() => control('reset')}>{t('confirmReset')}</button></div></dialog>}
+    {confirmStop && <dialog ref={stopDialog} className="settings-dialog stop-dialog" onCancel={() => setConfirmStop(false)} aria-labelledby="stop-title" aria-describedby="stop-description"><div className="dialog-heading"><h2 id="stop-title">{t('stopTitle')}</h2><button className="icon-button" aria-label={t('close')} onClick={() => setConfirmStop(false)}><X size={20}/></button></div><p id="stop-description">{t('stopDescription')}</p><div className="heading-actions"><button className="button secondary" ref={cancelStopButton} autoFocus onClick={() => setConfirmStop(false)}>{t('cancel')}</button><button className="button primary" onClick={() => control('stop')}>{t('confirmStop')}</button></div></dialog>}
   </div>
 }
