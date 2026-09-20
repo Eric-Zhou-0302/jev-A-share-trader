@@ -11,13 +11,24 @@ ACTIONS = {"buy": ("买入", "Buy"), "hold": ("持有", "Hold"), "sell": ("卖�
 SIDES = {"support": ("支持证据", "Supporting evidence"), "oppose": ("反对证据", "Opposing evidence"), "context": ("背景证据", "Context")}
 
 
+def evidence_labels(result: Analysis, language="zh") -> dict[str, str]:
+    index = int(language == "en")
+    labels = {side: names[index] for side, names in SIDES.items()}
+    if result.action:
+        action = ACTIONS[result.action][index]
+        labels["support"] = f"Evidence supporting {action}" if index else f"支持{action}的证据"
+        labels["oppose"] = f"Evidence opposing {action}" if index else f"反对{action}的证据"
+    return labels
+
+
 def localize(result: Analysis, language="zh") -> dict:
     index = int(language == "en")
+    labels = evidence_labels(result, language)
     return {
         "symbol": result.symbol, "name": result.name, "as_of": result.as_of, "source": result.source,
         "status": result.status, "action": ACTIONS[result.action][index] if result.action else ("未形成判断", "No decision")[index],
         "horizon": (f"未来 {result.horizon} 个交易日" if index == 0 else f"Next {result.horizon} trading sessions") if result.horizon else None,
-        "evidence": [{"side": SIDES[item.side][index], "group": GROUP_NAMES.get(item.group, ("汇总", "Aggregate"))[index], "date": item.date, "text": item.en if index else item.zh} for item in result.evidence],
+        "evidence": [{"side": labels[item.side], "group": GROUP_NAMES.get(item.group, ("汇总", "Aggregate"))[index], "date": item.date, "text": item.en if index else item.zh} for item in result.evidence],
         "notices": [item["en" if index else "zh"] for item in result.notices],
         "meaning": ("持有对未持仓者表示观望；卖出对未持仓者表示回避。适用周期是分析窗口，不是延迟执行期限。", "Without a position, Hold means wait and Sell means avoid. The horizon is an analysis window, not an instruction to delay an action.")[index],
     }
@@ -40,8 +51,7 @@ def export_analysis(result: Analysis, kind: str, language="zh") -> str:
         raise ValueError("unsupported export format")
     escape = html.escape
     sections = []
-    for side in SIDES:
-        label = SIDES[side][int(language == "en")]
+    for label in evidence_labels(result, language).values():
         items = [item for item in data["evidence"] if item["side"] == label]
         if not items:
             continue
