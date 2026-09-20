@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 
@@ -122,7 +123,8 @@ class Engine:
             saved = self.store.get(f"decision:{digest}", max_age=86400)
             if saved:
                 return Analysis.model_validate(saved).model_copy(update={"cached": True})
-        result = Analysis(id=digest[:24], symbol=stock.symbol, name=stock.name, market=stock.market,
+        # 缓存命中可复用原报告；实际重新计算时创建独立快照，不能覆盖历史报告。
+        result = Analysis(id=uuid.uuid4().hex, symbol=stock.symbol, name=stock.name, market=stock.market,
             as_of=requested.isoformat(), requested_as_of=requested.isoformat(), created_at=datetime.now(SHANGHAI).isoformat(),
             status="technical_only", source=source, rows=len(frame), evidence=technical.evidence, metrics=technical.metrics,
             bars=records(frame.tail(300)), charts=technical.charts, notices=notices, groups_available=technical.groups_available)
@@ -137,8 +139,5 @@ class Engine:
             except AnalysisError as exc:
                 result.status = exc.code
                 result.notices.append(notice(exc.code, exc.zh, exc.en))
-        # 同一数据状态下的技术预览不能覆盖已有有效判断。
-        if result.status != "ready":
-            result.id = f"{result.id}-{result.status}"
         self.store.save_analysis(result.model_dump(mode="json"))
         return result

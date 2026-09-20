@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, CircleMinus, Download, FileCheck2, Info, RefreshCw } from 'lucide-react'
 import Chart from './Chart'
 import { groupName, groups, translate } from './i18n'
 import type { Analysis, Evidence, Lang } from './types'
 
-export default function Result({ result, lang, busy, onRefresh, onConfigure }: { result: Analysis; lang: Lang; busy: boolean; onRefresh: () => void; onConfigure: () => void }) {
+export default function Result({ result, lang, busy, onRefresh, onConfigure, onReady }: { result: Analysis; lang: Lang; busy: boolean; onRefresh: () => void; onConfigure: () => void; onReady?: () => void }) {
+  useEffect(() => { onReady?.() }, [onReady, result.id])
   const t = (key: Parameters<typeof translate>[1]) => translate(lang, key)
   const [tab, setTab] = useState('evidence')
   const [group, setGroup] = useState('all')

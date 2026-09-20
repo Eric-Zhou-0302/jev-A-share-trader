@@ -171,3 +171,42 @@ def test_switch_save_failure_keeps_existing_provider(engine, monkeypatch):
     with TestClient(create_app(engine.directory, engine), raise_server_exceptions=False) as client:
         assert client.put("/api/settings", json={"provider": "tushare", "tushare_token": "test-only"}).status_code == 500
     assert engine.provider is old and engine.settings.provider == "akshare" and replacement.closed
+
+
+def test_reanalysis_after_cache_expiry_keeps_original_report_and_audit(engine):
+    calls = enable_model(engine)
+    first = engine.analyze("000001")
+    original = engine.store.analysis(first.id)
+    original_audit = engine.store.get(f"audit:{first.id}")
+    assert engine.analyze("000001").id == first.id
+    with engine.store.connect() as db:
+        db.execute("UPDATE cache SET updated=0 WHERE key LIKE 'decision:%'")
+    second = engine.analyze("000001")
+    assert first.id != second.id and len(calls) == 2
+    assert engine.store.analysis(first.id) == original
+    assert engine.store.get(f"audit:{first.id}") == original_audit
+    assert engine.store.summaries("000001.SZ")[0]["id"] == second.id
+    preview = engine.analyze("000001", technical_only=True)
+    assert preview.id not in (first.id, second.id)
+    assert engine.store.analysis(first.id) == original
+
+
+def test_history_search_and_stock_lookup_cover_older_records_without_analysis(engine):
+    for i in range(106):
+        engine.store.save_analysis({"id": f"record-{i}", "symbol": "000001.SZ" if i == 0 else "600000.SH",
+                                   "name": "早期股票" if i == 0 else "分页测试", "as_of": "2026-09-17" if i == 0 else "2026-09-18",
+                                   "created_at": f"2026-09-20T10:{i % 60:02}:00+08:00",
+                                   "status": "ready", "action": "hold", "horizon": "2-5"})
+    with TestClient(create_app(engine.directory, engine)) as client:
+        assert len(client.get("/api/analyses").json()) == 100
+        assert client.get("/api/analyses?symbol=000001").json()[0]["id"] == "record-0"
+        response = client.get("/api/analyses/search?q=早期&date_from=2026-09-17&date_to=2026-09-17").json()
+        assert response["total"] == 1 and response["items"][0]["id"] == "record-0"
+        page = client.get("/api/analyses/search?limit=20&page=5").json()
+        assert (page["page"], page["total"], len(page["items"])) == (5, 106, 6)
+        empty = client.get("/api/analyses/search?q=missing&page=100").json()
+        assert empty["items"] == [] and empty["page"] == 0
+        assert client.get("/api/analyses/search?date_from=2026-09-18&date_to=2026-09-17").json()["code"] == "invalid_date_range"
+        assert client.get("/api/analyses/search?date_from=2026-99-99").status_code == 422
+        assert client.get("/api/analyses/search?limit=0").status_code == 422
+        assert engine.provider.calls == 0

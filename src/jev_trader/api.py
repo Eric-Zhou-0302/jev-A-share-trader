@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -159,6 +160,15 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
     def history(symbol: str | None = None):
         return engine.store.summaries(normalize_symbol(symbol) if symbol else None)
 
+    @app.get("/api/analyses/search")
+    def search_history(q: str = Query(default="", max_length=60), date_from: date | None = None,
+                       date_to: date | None = None, page: int = Query(default=0, ge=0),
+                       limit: int = Query(default=50, ge=1, le=100)):
+        if date_from and date_to and date_from > date_to:
+            raise AnalysisError("invalid_date_range", "开始日期不能晚于结束日期。", "The start date must not be after the end date.")
+        return engine.store.search_summaries(q, date_from.isoformat() if date_from else None,
+                                            date_to.isoformat() if date_to else None, page, limit)
+
     @app.get("/api/analyses/{identifier}")
     def analysis(identifier: str):
         saved = engine.store.analysis(identifier)
@@ -190,8 +200,10 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
         return manager.get(identifier)
 
     @app.post("/api/jobs/{identifier}/{operation}")
-    def control_job(identifier: str, operation: Literal["pause", "resume", "retry"]):
+    def control_job(identifier: str, operation: Literal["pause", "resume", "retry", "reset"]):
         manager.get(identifier)
+        if operation == "reset":
+            return manager.reset(identifier)
         return manager.pause(identifier) if operation == "pause" else manager.resume(identifier, retry_failed=operation == "retry")
 
     web = Path(__file__).parent / "web"

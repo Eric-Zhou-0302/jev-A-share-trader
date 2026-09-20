@@ -92,6 +92,17 @@ class Store:
             else:
                 db.execute("INSERT OR IGNORE INTO watchlist VALUES(?,?,?)", (symbol, name, time.time()))
 
+    def search_summaries(self, query="", date_from=None, date_to=None, page=0, limit=50):
+        # 只扫描轻量摘要；搜索覆盖全部历史，不受侧栏最近 100 条的限制。
+        query = query.strip().casefold()
+        matches = [item for item in self.summaries(limit=-1)
+                   if (not query or query in f"{item['symbol']} {item['name']}".casefold())
+                   and (not date_from or item["as_of"] >= date_from)
+                   and (not date_to or item["as_of"] <= date_to)]
+        total = len(matches)
+        page = min(page, max(0, (total - 1) // limit))
+        return {"items": matches[page * limit:(page + 1) * limit], "total": total, "page": page, "limit": limit}
+
     def save_job(self, value: dict):
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?)", (value["id"], value["created"], self.pack(value)))

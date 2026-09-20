@@ -9,6 +9,8 @@ import uuid
 
 from .models import AnalysisError, Stock
 
+ACTIVE_STATUSES = ("running", "preparing", "pausing", "resetting")
+
 
 class JobManager:
     def __init__(self, engine):
@@ -21,8 +23,8 @@ class JobManager:
         if self._acquire():
             try:
                 for job in self.jobs.values():
-                    if job["status"] in ("running", "preparing", "pausing"):
-                        job["status"] = "paused"
+                    if job["status"] in ACTIVE_STATUSES:
+                        job["status"] = "reset" if self.engine.store.get(f"reset:{job['id']}") else "paused"
                         self._save(job)
             finally:
                 self._release()
@@ -71,7 +73,9 @@ class JobManager:
 
     def summary(self, job):
         rows = job.get("items", [])
-        if job["status"] in ("running", "preparing") and self.engine.store.get(f"pause:{job['id']}"):
+        if self.engine.store.get(f"reset:{job['id']}"):
+            job = {**job, "status": "resetting" if job["status"] in ACTIVE_STATUSES else "reset"}
+        elif job["status"] in ("running", "preparing") and self.engine.store.get(f"pause:{job['id']}"):
             job = {**job, "status": "pausing"}
         return {**{key: value for key, value in job.items() if key not in ("items", "sessions")}, "total": len(rows), "downloaded": sum(item["data_status"] != "pending" for item in rows), "completed": sum(item["status"] == "ready" for item in rows), "failed": sum(item["status"] == "failed" for item in rows), "skipped": sum(item["status"] == "skipped" for item in rows), "remaining": sum(item["status"] == "pending" for item in rows)}
 
@@ -107,6 +111,8 @@ class JobManager:
     def resume(self, identifier, retry_failed=False):
         with self.lock:
             job = self._read(identifier)
+            if job["status"] == "reset" or self.engine.store.get(f"reset:{identifier}"):
+                raise AnalysisError("job_reset", "该任务已重置，请开始新的扫描。", "This job was reset. Start a new scan.")
             if job.get("configuration") != self._configuration():
                 raise AnalysisError("job_config_changed", "分析配置已变化，请新建扫描任务。", "Analysis configuration changed; start a new scan.")
             if not self.engine.settings.jev_api_key.get_secret_value():
@@ -126,8 +132,26 @@ class JobManager:
             self.thread.start()
             return self.summary(job)
 
+    def reset(self, identifier):
+        with self.lock:
+            job = self._read(identifier)
+            # 只写控制标记，不覆盖其他进程正在保存的进度；保留历史分析与行情缓存。
+            self.engine.store.put(f"reset:{identifier}", True)
+            if not self.active and self._acquire():
+                try:
+                    job = self._read(identifier)
+                    job["status"] = "reset"
+                    self._save(job)
+                finally:
+                    self._release()
+            return self.summary(job)
+
     def _paused(self, job):
         with self.lock:
+            if self.engine.store.get(f"reset:{job['id']}"):
+                job["status"] = "reset"
+                self._save(job)
+                return True
             if job["status"] == "pausing" or self.engine.store.get(f"pause:{job['id']}"):
                 job["status"] = "paused"
                 self._save(job)
@@ -137,12 +161,18 @@ class JobManager:
     def _run(self, identifier):
         job = self.jobs[identifier]
         try:
+            if self._paused(job):
+                return
             sessions, cutoff = self.engine.context()
+            if self._paused(job):
+                return
             if job["as_of"] and job["as_of"] != cutoff.isoformat():
                 raise AnalysisError("job_expired", "扫描的截止交易日已变化，请创建新任务，避免混用不同时点。", "The completed trading date has changed. Start a new scan to avoid mixing cutoffs.")
             job["as_of"] = cutoff.isoformat()
             if not job["items"]:
                 stocks = self.engine.provider.universe()
+                if self._paused(job):
+                    return
                 if job["symbols"] is not None:
                     wanted = set(job["symbols"])
                     stocks = [stock for stock in stocks if stock.symbol in wanted]
@@ -170,6 +200,8 @@ class JobManager:
                     item["data_status"], item["status"] = "skipped" if filtered else "failed", "skipped" if filtered else "failed"
                     item["error"] = {"code": exc.code, "zh": exc.zh, "en": exc.en}
                 self._save(job)
+            if self._paused(job):
+                return
             if job["scope"] == "market":
                 eligible = [item for item in job["items"] if item["status"] != "skipped"]
                 valid = [item for item in eligible if item["data_status"] == "ready"]
@@ -197,6 +229,8 @@ class JobManager:
                 except AnalysisError as exc:
                     item["status"], item["error"] = "failed", {"code": exc.code, "zh": exc.zh, "en": exc.en}
                 self._save(job)
+            if self._paused(job):
+                return
             job["status"] = "partial" if any(item["status"] == "failed" for item in job["items"]) else "completed"
             self._save(job)
         except AnalysisError as exc:
@@ -209,8 +243,12 @@ class JobManager:
             logging.getLogger(__name__).exception("Scan failed")
         finally:
             with self.lock:
-                self.active = None
-                self._release()
+                # 请求可能恰好在最后一次保存或异常处理时到达，退出前仍需确认。
+                try:
+                    self._paused(job)
+                finally:
+                    self.active = None
+                    self._release()
 
     def shutdown(self):
         if self.active:
