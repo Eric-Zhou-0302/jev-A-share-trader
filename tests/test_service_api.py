@@ -210,3 +210,34 @@ def test_history_search_and_stock_lookup_cover_older_records_without_analysis(en
         assert client.get("/api/analyses/search?date_from=2026-99-99").status_code == 422
         assert client.get("/api/analyses/search?limit=0").status_code == 422
         assert engine.provider.calls == 0
+
+
+def test_scan_history_filters_pages_and_preserves_older_tasks_without_running_them(engine):
+    from jev_trader.jobs import JobManager
+
+    calls = enable_model(engine)
+    with TestClient(create_app(engine.directory, engine)) as client:
+        for i in range(66):
+            engine.store.save_job({"id": f"archived-{i:03}", "created": i, "scope": "market" if i % 2 == 0 else "watchlist",
+                                   "status": "completed" if i < 64 else "paused", "phase": "analysis", "items": [], "as_of": "2026-09-18"})
+        # 控制标记须体现在筛选结果中，即使原任务快照尚未更新。
+        engine.store.put("reset:archived-064", True)
+        before = engine.provider.calls
+        assert len(client.get("/api/jobs").json()) == 50
+        history = client.get("/api/jobs/search?scope=market&status=completed&page=1&limit=20").json()
+        assert (history["total"], history["page"], len(history["items"])) == (32, 1, 12)
+        assert history["items"][-1]["id"] == "archived-000"
+        assert all("items" not in job for job in history["items"])
+        assert client.get("/api/jobs/archived-000").json()["status"] == "completed"
+        assert client.get("/api/jobs/search?status=reset").json()["items"][0]["id"] == "archived-064"
+        assert client.get("/api/jobs/search?status=paused").json()["total"] == 1
+        assert client.get("/api/jobs/search?scope=market&status=paused&page=99").json() == {"items": [], "total": 0, "page": 0, "limit": 20}
+        assert client.get("/api/jobs/search?page=999&limit=20").json()["page"] == 3
+        older = engine.store.job("archived-000")
+        older["status"] = "running"
+        engine.store.save_job(older)
+        assert client.get("/api/jobs").json()[-1]["id"] == "archived-000"
+        assert JobManager(engine).get("archived-000")["status"] == "paused"
+        for query in ["page=-1", "limit=0", "scope=invalid", "status=invalid"]:
+            assert client.get(f"/api/jobs/search?{query}").status_code == 422
+        assert engine.provider.calls == before and calls == []

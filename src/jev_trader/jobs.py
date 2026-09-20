@@ -19,7 +19,7 @@ class JobManager:
         self.lease = None
         self.thread = None
         self.active: str | None = None
-        self.jobs = {item["id"]: item for item in engine.store.jobs()}
+        self.jobs = {item["id"]: item for item in engine.store.jobs(limit=-1)}
         if self._acquire():
             try:
                 for job in self.jobs.values():
@@ -69,7 +69,17 @@ class JobManager:
 
     def list(self):
         with self.lock:
-            return [self.summary(job) for job in self.engine.store.jobs()]
+            # 较早的任务也能从历史中恢复，不能被最近 50 条的默认窗口隐藏。
+            jobs = [self.summary(job) for job in self.engine.store.jobs(limit=-1)]
+            return jobs[:50] + [job for job in jobs[50:] if job["status"] in ACTIVE_STATUSES]
+
+    def search(self, scope="all", status="all", page=0, limit=20):
+        with self.lock:
+            jobs = [self.summary(job) for job in self.engine.store.jobs(limit=-1) if scope == "all" or job["scope"] == scope]
+            matches = [job for job in jobs if status == "all" or job["status"] == status]
+        total = len(matches)
+        page = min(page, max(0, (total - 1) // limit))
+        return {"items": matches[page * limit:(page + 1) * limit], "total": total, "page": page, "limit": limit}
 
     def summary(self, job):
         rows = job.get("items", [])

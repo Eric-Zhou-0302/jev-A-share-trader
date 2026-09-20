@@ -107,9 +107,9 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO jobs VALUES(?,?,?)", (value["id"], value["created"], self.pack(value)))
 
-    def jobs(self) -> list[dict]:
+    def jobs(self, limit=50) -> list[dict]:
         with self.connect() as db:
-            rows = db.execute("SELECT value FROM jobs ORDER BY created DESC LIMIT 50").fetchall()
+            rows = db.execute("SELECT value FROM jobs ORDER BY created DESC LIMIT ?", (limit,)).fetchall()
         return [self.unpack(row[0]) for row in rows]
 
     def job(self, identifier: str) -> dict | None:

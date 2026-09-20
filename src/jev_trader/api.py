@@ -195,6 +195,12 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
             raise AnalysisError("empty_watchlist", "请先添加自选股。", "Add stocks to the watchlist first.")
         return manager.start(symbols)
 
+    @app.get("/api/jobs/search")
+    def scan_history(scope: Literal["all", "market", "watchlist"] = "all",
+                     status: Literal["all", "preparing", "running", "pausing", "paused", "completed", "partial", "failed", "resetting", "reset"] = "all",
+                     page: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100)):
+        return manager.search(scope, status, page, limit)
+
     @app.get("/api/jobs/{identifier}")
     def job(identifier: str):
         return manager.get(identifier)
