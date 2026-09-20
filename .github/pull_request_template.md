@@ -8,6 +8,6 @@ List the checks actually run and their results; note anything not verified. / �
 
 ## Relevant details / 相关说明
 
-For indicators or providers, describe changes to formulas, units, adjustments, or data cutoffs. For UI changes, include screenshots when useful. Disclose substantial AI assistance and how the output was checked.
+For indicators or providers, describe changes to formulas, units, adjustments, or data cutoffs. For UI changes, include screenshots when useful.
 
-涉及指标或数据源时，说明公式、单位、复权或截止日期的变化。界面修改可附截图。大量使用 AI 辅助时，请说明使用范围和核验方式。
+涉及指标或数据源时，说明公式、单位、复权或截止日期的变化。界面修改可附截图。

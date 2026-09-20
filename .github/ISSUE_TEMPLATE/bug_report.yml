@@ -12,7 +12,7 @@ body:
     attributes:
       label: Environment / 运行环境
       description: App version or commit, OS, Python, browser or CLI, and data provider. Node version if relevant.
-      placeholder: v0.1.0 / macOS / Python 3.14 / Web / AKShare
+      placeholder: v0.1.1 / macOS / Python 3.14 / Web / AKShare
     validations:
       required: true
   - type: textarea

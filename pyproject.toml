@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-a-share-trader"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local A-share technical analysis with Jev structured decisions"
 keywords = ["jev", "typesafe", "a-shares", "technical-analysis", "akshare", "tushare"]
 readme = "README.md"

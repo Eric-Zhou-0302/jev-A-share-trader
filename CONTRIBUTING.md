@@ -58,6 +58,6 @@ Use completed sessions and periods only. Required-data or model failures must no
 
 Keep each PR focused on one problem. Explain behavior changes, actual validation, and remaining limits. Update both languages when changing UI text or READMEs. Do not claim unmeasured returns, accuracy, latency, or costs.
 
-欢迎 AI 辅助贡献；请说明主要使用范围，并核对生成的代码、文档和测试。本项目初始实现使用了 Codex 辅助开发；本地验证记录不代表已经验证交易收益或所有上游接口。
+提交前请核对代码、文档和测试的一致性。本地验证记录不代表已经验证交易收益或所有上游接口。
 
-AI-assisted contributions are welcome. Disclose substantial use and verify the resulting code, documentation, and tests. The initial implementation used Codex assistance; local validation does not establish trading profitability or universal upstream availability.
+Check that code, documentation, and tests agree before submitting. Local validation does not establish trading profitability or universal upstream availability.
