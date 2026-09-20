@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from . import __version__
 from .config import Settings, data_directory, public_settings, save_settings
 from .export import export_analysis
 from .jobs import JobManager
@@ -54,7 +55,7 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
         manager.shutdown()
         engine.close()
 
-    app = FastAPI(title="Jev A-share trader", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Jev A-share trader", version=__version__, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"])
     app.state.engine, app.state.jobs = engine, manager
 
@@ -81,7 +82,7 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "version": "0.1.0", "provider": engine.settings.provider, "jev_configured": bool(engine.settings.jev_api_key.get_secret_value())}
+        return {"status": "ok", "version": __version__, "provider": engine.settings.provider, "jev_configured": bool(engine.settings.jev_api_key.get_secret_value())}
 
     @app.get("/api/settings")
     def settings():
