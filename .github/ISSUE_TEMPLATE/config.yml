@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: User guide / 使用指南
+    url: https://github.com/Eric-Zhou-0302/jev-A-share-trader/blob/main/docs/usage.md
+    about: Configuration, data providers, and troubleshooting / 配置、数据源与常见问题
+  - name: Methodology / 分析方法
+    url: https://github.com/Eric-Zhou-0302/jev-A-share-trader/blob/main/docs/methodology.md
+    about: Indicator formulas, data cutoffs, and aggregation / 指标公式、数据时点与汇总规则

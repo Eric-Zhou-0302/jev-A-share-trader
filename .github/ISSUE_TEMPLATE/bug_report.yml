@@ -1,0 +1,42 @@
+name: Bug report / 问题反馈
+description: Report a reproducible problem / 反馈可复现的问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        中文或英文均可。请勿上传 API key、Token、settings.json 或含凭据的代理地址。
+        Chinese and English are welcome. Do not share credentials, settings.json, or authenticated proxy URLs.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 运行环境
+      description: App version or commit, OS, Python, browser or CLI, and data provider. Node version if relevant.
+      placeholder: v0.1.0 / macOS / Python 3.14 / Web / AKShare
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: Include the command or page action, stock code, and analysis cutoff date if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 实际行为
+      description: Include the displayed error. Remove private data from screenshots and logs.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs / 脱敏日志（可选）
+      render: text

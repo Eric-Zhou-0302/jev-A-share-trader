@@ -3,6 +3,11 @@
 <p align="center"><strong>基于 Jev 的 A 股技术分析工作台</strong></p>
 <p align="center">从价格与成交量，读懂市场结构。</p>
 <p align="center">
+  <a href="https://github.com/Eric-Zhou-0302/jev-A-share-trader/actions/workflows/ci.yml"><img src="https://github.com/Eric-Zhou-0302/jev-A-share-trader/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3d6047" alt="MIT License" /></a>
+  <a href="https://github.com/Eric-Zhou-0302/jev-A-share-trader/tree/v0.1.0"><img src="https://img.shields.io/badge/version-0.1.0-3d6047" alt="v0.1.0" /></a>
+</p>
+<p align="center">
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
   <br />
   <a href="#快速开始">快速开始</a> · <a href="#技术分析覆盖">技术指标</a> · <a href="docs/methodology.md">分析方法</a> · <a href="docs/usage.md">使用指南</a>
@@ -36,9 +41,11 @@
 
 ### 1. 安装并启动
 
-下载或克隆项目后，进入项目根目录：
+克隆项目并进入项目根目录：
 
 ```bash
+git clone https://github.com/Eric-Zhou-0302/jev-A-share-trader.git
+cd jev-A-share-trader
 python -m pip install -e .
 npm --prefix frontend ci
 npm --prefix frontend run build
@@ -147,6 +154,7 @@ jev scan --resume JOB_ID --retry
 | [数据源与扩展](docs/providers.md) | AKShare / Tushare 接口及自定义提供方契约 |
 | [需求规格](docs/requirements.md) | 产品范围与交互约定 |
 | [更新日志](CHANGELOG.md) | 版本记录与功能变化 |
+| [参与贡献](CONTRIBUTING.md) | 开发流程、验证方式与 PR 约定 |
 
 技术栈：Python · FastAPI · pandas · TA-Lib · SQLite · React · TypeScript · Vite。
 
@@ -166,8 +174,14 @@ npm --prefix frontend run build
 
 </details>
 
+## Jev 生态与参与
+
+项目直接调用 TypeSafe System One API，使用 `Choice` 判断各维度方向、`Noul` 评估波动风险。调用与校验见 [jev.py](src/jev_trader/jev.py)，对应验证见 [test_jev.py](tests/test_jev.py)。Jev 的使用方式可参考 [官方文档](https://docs.typesafe.ai/introduction)；更多社区项目可在 [Awesome Jev](https://awesomejev.com/) 中发现。
+
+欢迎通过 [Issue](https://github.com/Eric-Zhou-0302/jev-A-share-trader/issues) 和 Pull Request 参与，详见 [贡献指南](CONTRIBUTING.md)。本项目独立开发，与 TypeSafe AI 无隶属关系。
+
 ## 项目边界
 
 当前专注于最新收盘状态下的技术研究，不包含回测系统、持仓管理、自动下单或买入价／止损价／目标价。判断规则尚未经过收益回测，Jev 输出的概率不等于交易胜率。服务面向本地个人使用，不包含公网多用户认证。
 
-图表由 TradingView Lightweight Charts 提供，相关 [第三方许可](licenses/lightweight-charts-LICENSE.txt) 与 [版权声明](licenses/lightweight-charts-NOTICE.txt) 随项目保留。
+项目代码采用 [MIT 许可证](LICENSE)。图表由 TradingView Lightweight Charts 提供，相关 [第三方许可](licenses/lightweight-charts-LICENSE.txt) 与 [版权声明](licenses/lightweight-charts-NOTICE.txt) 随项目保留。

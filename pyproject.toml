@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "jev-a-share-trader"
 version = "0.1.0"
 description = "Local A-share technical analysis with Jev structured decisions"
+keywords = ["jev", "typesafe", "a-shares", "technical-analysis", "akshare", "tushare"]
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
   "pandas>=2.2,<4", "numpy>=2,<3", "TA-Lib>=0.6,<1",
@@ -16,6 +18,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[project.urls]
+Repository = "https://github.com/Eric-Zhou-0302/jev-A-share-trader"
+Documentation = "https://github.com/Eric-Zhou-0302/jev-A-share-trader#readme"
+Issues = "https://github.com/Eric-Zhou-0302/jev-A-share-trader/issues"
+Changelog = "https://github.com/Eric-Zhou-0302/jev-A-share-trader/blob/main/CHANGELOG.md"
 
 [project.scripts]
 jev = "jev_trader.cli:main"

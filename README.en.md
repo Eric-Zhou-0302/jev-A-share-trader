@@ -3,6 +3,11 @@
 <p align="center"><strong>A Jev-powered technical analysis workspace for China A-shares</strong></p>
 <p align="center">Read market structure through price and volume.</p>
 <p align="center">
+  <a href="https://github.com/Eric-Zhou-0302/jev-A-share-trader/actions/workflows/ci.yml"><img src="https://github.com/Eric-Zhou-0302/jev-A-share-trader/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3d6047" alt="MIT License" /></a>
+  <a href="https://github.com/Eric-Zhou-0302/jev-A-share-trader/tree/v0.1.0"><img src="https://img.shields.io/badge/version-0.1.0-3d6047" alt="v0.1.0" /></a>
+</p>
+<p align="center">
   <a href="README.md">简体中文</a> · <strong>English</strong>
   <br />
   <a href="#quick-start">Quick start</a> · <a href="#technical-analysis-coverage">Indicators</a> · <a href="docs/methodology.md">Methodology</a> · <a href="docs/usage.md">User guide</a>
@@ -36,9 +41,11 @@ Requires **Python 3.11+**, plus **Node.js 22.12+** for the web interface. Use ma
 
 ### 1. Install and start
 
-Download or clone the project, then run from its root directory:
+Clone the project and enter its root directory:
 
 ```bash
+git clone https://github.com/Eric-Zhou-0302/jev-A-share-trader.git
+cd jev-A-share-trader
 python -m pip install -e .
 npm --prefix frontend ci
 npm --prefix frontend run build
@@ -149,6 +156,7 @@ The detailed documents below are currently in Chinese.
 | [Data providers](docs/providers.md) | AKShare / Tushare endpoints and the custom-provider contract |
 | [Requirements](docs/requirements.md) | Product scope and interaction conventions |
 | [Changelog](CHANGELOG.md) | Version history and feature changes |
+| [Contributing](CONTRIBUTING.md) | Development, validation, and pull request guidelines |
 
 Stack: Python · FastAPI · pandas · TA-Lib · SQLite · React · TypeScript · Vite.
 
@@ -168,8 +176,14 @@ For frontend development, run `jev serve` in one terminal and `npm --prefix fron
 
 </details>
 
+## Jev ecosystem and contributions
+
+The project calls the TypeSafe System One API directly, using `Choice` for each dimension’s direction and `Noul` for volatility risk. See [jev.py](src/jev_trader/jev.py) for requests and response validation, and [test_jev.py](tests/test_jev.py) for corresponding checks. Learn more in the [official documentation](https://docs.typesafe.ai/introduction), or discover other community projects in [Awesome Jev](https://awesomejev.com/).
+
+[Issues](https://github.com/Eric-Zhou-0302/jev-A-share-trader/issues) and pull requests are welcome; see the [contribution guide](CONTRIBUTING.md). This project is independently developed and is not affiliated with TypeSafe AI.
+
 ## Scope
 
 The current focus is technical research based on the latest completed session. There is no backtesting, portfolio management, order execution, or entry / stop-loss / target pricing. Decision rules have not been validated through return backtests, and Jev probabilities are not empirical trading win rates. The service is intended for personal local use and does not include public multi-user authentication.
 
-Charts use TradingView Lightweight Charts. Its [third-party license](licenses/lightweight-charts-LICENSE.txt) and [copyright notice](licenses/lightweight-charts-NOTICE.txt) are included.
+Project code is licensed under [MIT](LICENSE). Charts use TradingView Lightweight Charts, with its [third-party license](licenses/lightweight-charts-LICENSE.txt) and [copyright notice](licenses/lightweight-charts-NOTICE.txt) included.

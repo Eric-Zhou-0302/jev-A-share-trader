@@ -1,0 +1,22 @@
+name: Feature request / 功能建议
+description: Propose a concrete improvement / 提出具体改进建议
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Use case / 使用场景
+      description: What are you trying to do, and what is missing? / 你想完成什么，目前缺少什么？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 建议行为
+      description: Describe the result a user should see. / 描述用户应该看到的结果。
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Alternatives and references / 替代方案与参考（可选）
