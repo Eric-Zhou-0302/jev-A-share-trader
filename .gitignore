@@ -1,0 +1,39 @@
+# Python 环境、缓存与构建产物
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# 前端依赖与生成文件
+node_modules/
+src/jev_trader/web/
+*.tsbuildinfo
+
+# 本机凭据与运行数据；仅允许无真实凭据的环境变量示例
+.env
+.env.*
+!.env.example
+!.env.sample
+settings.json
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+scan.lock
+.data/
+.qa/
+*.log
+
+# README 命令生成的本地报告
+/analysis.html
+/analysis.csv
+/analysis.json
+
+# 系统文件
+.DS_Store

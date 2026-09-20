@@ -1,0 +1,111 @@
+# 使用指南
+
+[返回 README](../README.md) · [分析方法](methodology.md) · [数据源与扩展](providers.md)
+
+## 运行环境与安装
+
+Python 依赖由 `pyproject.toml` 定义，前端依赖由 `frontend/package-lock.json` 锁定。正常安装方式见 README。`requirements.lock` 记录 Python 3.14 验证环境；其他受支持 Python 版本应按 `pyproject.toml` 解析兼容依赖。
+
+TA-Lib 优先使用预编译 Python wheel；没有兼容 wheel 的平台需要安装对应的 C 库。扫描进程锁使用 POSIX `flock`，Windows 请通过 WSL 运行，尚未验证原生 Windows。
+
+前端构建输出至 `src/jev_trader/web`，由后端统一提供。修改前端后运行 `npm --prefix frontend run build`；只使用 CLI 时无需构建。默认服务地址为 `http://127.0.0.1:8765`，可用 `jev serve --port 8766` 指定其他端口。
+
+## 配置数据源和模型
+
+网页设置支持选择 AKShare / Tushare、填写凭据和调整分析配置。数据源保存后立即切换；扫描运行时不能切换。CLI 修改配置后，应重启已运行的网页后端。
+
+```bash
+# 隐藏输入 Jev API key
+jev configure
+
+# 选择 Tushare，并隐藏输入 Token
+jev configure --provider tushare --tushare-token
+
+# 切回 AKShare
+jev configure --provider akshare
+
+# 查看脱敏后的配置
+jev configure --show
+```
+
+- Jev 默认模型为 `jev-latest`。未配置或调用失败时，保留可用技术数据，明确显示“未形成判断”。
+- AKShare 无需 API key，其公开上游的可用性取决于网络与接口状态。
+- Tushare 使用自己的 Token，且需要所用接口的权限。必要接口不可用会停止分析；行业、换手率等可选数据缺失会单独提示。各接口及权限说明见 [数据源文档](providers.md)。
+- 支持 `TYPESAFE_API_KEY`、`TUSHARE_TOKEN` 环境变量，启动时优先于本地配置。仅设置 Token 不会自动把提供方切换为 Tushare。
+- 凭据输入留空会保留已存值。API 响应与导出不返回密钥。
+
+## CLI 常用操作
+
+全局选项放在子命令之前，例如 `jev --lang en analyze 000001`。
+
+```bash
+# 分析与导出
+jev analyze 000001
+jev analyze 000001 --technical-only
+jev analyze 000001 --format json
+jev analyze 000001 --format csv --output analysis.csv
+jev --lang en analyze 000001 --format html --output analysis.html
+
+# 自选股
+jev watch add 000001
+jev watch list
+jev watch remove 000001
+
+# 扫描与任务
+jev scan --scope watchlist
+jev scan --scope market
+jev jobs
+jev scan --resume JOB_ID
+jev scan --resume JOB_ID --retry
+```
+
+`--technical-only` 不调用 Jev。正常分析未能形成判断时，CLI 返回退出码 2；技术预览模式不因没有模型结论而报错。
+
+## 扫描、暂停与恢复
+
+扫描先同步行情，再进行分析，分别统计成功、跳过和失败。默认覆盖沪深京，过滤 ST／退市整理、无成交和必要历史不足的股票；默认要求至少 260 根完整日线。股票通过基础校验后进入 Jev 评估，不额外按技术信号预筛选。
+
+- 网页可暂停任务；CLI 使用 `Ctrl+C`。暂停会等待当前请求结束并保存进度。
+- 同一数据目录下，网页与 CLI 通过文件锁避免同时运行扫描。
+- 恢复要求已完成交易日和分析配置一致。跨交易日或更换数据源、模型、权重、过滤条件后，应新建任务。
+- 更换 API key 不改变任务配置摘要，便于修复认证后恢复。
+- 使用 `--retry` 可重试失败项；已经成功的项目不会因此重复调用。
+- 模型认证或响应故障会暂停批量分析，不把失败记作“持有”。
+
+网页分析记录首页展示最近 100 条，完整扫描结果可在对应任务中分页查看。首次全市场扫描可能耗时较长，并产生较多模型调用；吞吐取决于网络、上游限制与账户额度。
+
+## 本地数据与缓存
+
+默认目录为 `~/.local/share/jev-a-share-trader/`。可以设置 `JEV_DATA_DIR`，或使用全局选项 `jev --data-dir PATH ...`；网页和 CLI 使用同一目录时才共享记录。
+
+| 文件 | 内容 |
+| --- | --- |
+| `settings.json` | 数据提供方、模型、过滤、汇总参数及用户配置的凭据 |
+| `market.sqlite3` | 行情缓存、分析快照、模型审计、自选股与扫描任务 |
+| `scan.lock` | 扫描进程互斥锁 |
+
+`settings.json` 以 `0600` 权限写入，但凭据仍是本地明文，不是系统钥匙串。不应把数据目录提交到仓库或分享给他人。
+
+行情按来源隔离缓存，禁止混接不同数据源或复权基准。首次默认请求约十年日线；AKShare 增量刷新并检查复权重叠窗口，Tushare 按截止日重算前复权序列，细节见 [数据源文档](providers.md)。
+
+相同技术状态、来源、模型、问题版本与汇总参数可复用 24 小时内成功的 Jev 结果。网页“重新分析”会重新检查数据，但仍可能命中该缓存。历史缓存不构成历史时点可得数据仓库，不能直接用于无前视偏差的回测。
+
+## 常见问题
+
+### AKShare 提示 ProxyError 或接口不可用
+
+AKShare 是接口库，各项数据来自不同上游。一个接口失败，不代表所有行情都不可用，也不表示股票本身有问题。可以根据错误中给出的接口名称检查本机网络和代理，或在设置中切换至具备相应权限的 Tushare。
+
+当前 AKShare 个股日线支持东方财富／腾讯回退，大盘指数支持东方财富／新浪／腾讯回退。行业等可选数据缺失会单独提示，且不会被伪造成有效数据。
+
+### 为什么盘中看不到当天 K 线？
+
+系统只分析已完成交易日。北京时间 15:00 前使用前一交易日；收盘后也必须取得当日完整日线并通过校验。上游尚未更新时会提示缺失，不会把旧数据标成最新。
+
+### 为什么只有指标，没有买入／持有／卖出？
+
+检查 Jev 是否已配置、凭据是否有效，以及页面的数据或模型提示。模型调用失败不会转成“持有”。如只需要技术数据，可显式使用 `--technical-only`。
+
+### 为什么行业或市场宽度没有数据？
+
+行业参考需要数据源提供归属和同口径指数。市场宽度需要同日股票池数据达到覆盖要求；单只股票分析未必已有足够缓存。可选参考缺失会保留提示，其余可用维度仍参与分析。
