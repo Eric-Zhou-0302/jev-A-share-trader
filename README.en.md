@@ -17,7 +17,7 @@
 
 **Eight analytical dimensions. One traceable assessment.**
 
-`jev-A-share-trader` retrieves A-share market data through AKShare or Tushare, computes technical indicators and pattern evidence, and asks Jev to assess each dimension. Code then aggregates those assessments into a single **Buy, Hold, or Sell** decision. Analyze an individual stock, follow a watchlist, or scan the Shanghai, Shenzhen, and Beijing exchanges.
+`jev-A-share-trader` retrieves A-share market data through AKShare or Tushare, computes technical indicators and pattern evidence, and asks Jev to assess each dimension. Code then aggregates those assessments into a single **Buy, Hold, or Sell** decision. Analyze an individual stock, follow a watchlist, or scan your own list of Shanghai, Shenzhen, and Beijing A-shares.
 
 Every analysis answers three questions:
 
@@ -30,7 +30,7 @@ Analysis uses the latest completed trading session. During market hours, daily d
 ## Features
 
 - **Stock workspace** — Search by code or name, explore daily / weekly / monthly candles, switch between moving averages, Bollinger bands, volume, MACD, and RSI, and inspect individual indicators and evidence.
-- **Watchlists and market scans** — Cover all three A-share exchanges with progress tracking, pause, resume, and failed-item retries. Default filters exclude ST / delisting stocks, stocks with no trading volume, and insufficient history.
+- **Stock-list batch scans** — Paste symbols or use your watchlist, with up to 50 unique stocks per batch. Results arrive one stock at a time, in input order. Supports progress, pause, resume, and failed-item retries, with default ST / delisting, no-volume, and insufficient-history filters.
 - **Two data providers** — Switch between AKShare and Tushare Pro in settings, or implement a custom provider.
 - **Web and CLI** — Share local watchlists, analysis history, and scan jobs. Export results as JSON, CSV, or HTML.
 - **Chinese and English** — The interface and reports default to Chinese and support English.
@@ -135,15 +135,15 @@ jev --lang en analyze 000001 --format html --output analysis.html
 jev watch add 000001
 jev scan --scope watchlist
 
-# Scan the full market
-jev scan --scope market
+# Scan a stock list (deduplicated, up to 50 stocks per batch)
+jev scan --symbols 000001 600000.SH BJ920001
 
 # List jobs, resume a job, and retry failed items
 jev jobs
 jev scan --resume JOB_ID --retry
 ```
 
-Press `Ctrl+C` to pause a scan. Full-market scans generate substantial data requests and model calls; individual stocks or a watchlist are useful starting points. See the [user guide](docs/usage.md) for more commands, caching, and resume conditions.
+Press `Ctrl+C` to pause a scan. Each stock is analyzed immediately after its data arrives. Model errors or 3 consecutive data-processing failures pause the task automatically. Legacy full-market tasks remain viewable but cannot be created or resumed. See the [user guide](docs/usage.md) for more commands, caching, and resume conditions.
 
 ## Documentation and development
 

@@ -28,8 +28,9 @@ def main():
     watch = commands.add_parser("watch", help="管理自选股 / Manage the watchlist")
     watch.add_argument("operation", choices=["list", "add", "remove"], default="list", nargs="?")
     watch.add_argument("symbol", nargs="?")
-    scan = commands.add_parser("scan", help="全市场或自选股扫描 / Scan the market or watchlist")
-    scan.add_argument("--scope", choices=["market", "watchlist"], default="watchlist")
+    scan = commands.add_parser("scan", help="批量扫描股票列表或自选股 / Scan a stock list or watchlist")
+    scan.add_argument("--scope", choices=["batch", "watchlist"], default=None)
+    scan.add_argument("--symbols", nargs="+", help="股票代码列表，最多 50 只 / Up to 50 stock symbols")
     scan.add_argument("--resume")
     scan.add_argument("--retry", action="store_true")
     commands.add_parser("jobs", help="查看扫描记录 / List scan jobs")
@@ -39,6 +40,13 @@ def main():
     config.add_argument("--tushare-token", action="store_true", help="隐藏输入 Tushare Token / Prompt for a Tushare token")
     config.add_argument("--jev-key", action="store_true", help="隐藏输入 Jev API key / Prompt for a Jev key")
     args = parser.parse_args()
+    if args.command == "scan":
+        if args.resume and (args.symbols is not None or args.scope is not None):
+            parser.error("--resume cannot be combined with --symbols or --scope / 恢复任务不能指定新的股票池")
+        if args.retry and not args.resume:
+            parser.error("--retry requires --resume / 重试须指定任务")
+        if args.scope == "watchlist" and args.symbols is not None:
+            parser.error("--symbols cannot be combined with --scope watchlist / 自选股扫描不能附加列表")
     directory = args.data_dir or data_directory()
     directory.mkdir(parents=True, exist_ok=True)
     if args.command == "configure":
@@ -107,10 +115,11 @@ def main():
             if args.resume:
                 job = manager.resume(args.resume, retry_failed=args.retry)
             else:
-                symbols = [item["symbol"] for item in engine.store.watchlist()] if args.scope == "watchlist" else None
-                if symbols == []:
+                scope = args.scope or ("batch" if args.symbols is not None else "watchlist")
+                symbols = [item["symbol"] for item in engine.store.watchlist()] if scope == "watchlist" else args.symbols
+                if scope == "watchlist" and not symbols:
                     raise AnalysisError("empty_watchlist", "请先添加自选股。", "Add stocks to the watchlist first.")
-                job = manager.start(symbols)
+                job = manager.start(symbols, scope=scope)
             last = None
             try:
                 while manager.active:

@@ -1,6 +1,6 @@
-export type ScanScope = 'watchlist' | 'market'
+export type ScanScope = 'batch' | 'watchlist'
 export interface ScanView { scope: ScanScope }
-export interface ScanHistoryView { scope: 'all' | ScanScope; status: string; page: number }
+export interface ScanHistoryView { scope: 'all' | 'market' | ScanScope; status: string; page: number }
 export interface ScanTaskView { filter: string; page: number }
 export interface HistoryView { query: string; fromDate: string; toDate: string; page: number }
 export type SourceRoute = { page: 'workbench'; symbol: string } | { page: 'scans'; view: ScanView } | { page: 'scanHistory'; view: ScanHistoryView } | { page: 'history'; view: HistoryView } | { page: 'scanTask'; id: string; view: ScanTaskView; from: string }
@@ -21,7 +21,7 @@ export function parseRoute(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#/, '').split('?')
   const params = new URLSearchParams(query)
   if (path === '/scans') {
-    const view: ScanView = { scope: params.get('scope') === 'market' ? 'market' : 'watchlist' }
+    const view: ScanView = { scope: params.get('scope') === 'watchlist' ? 'watchlist' : 'batch' }
     const id = params.get('job')
     // 兼容旧扫描详情链接，入口本身不再自动打开最近任务。
     if (id && validId(id)) return { page: 'scanTask', id, view: taskView(params), from: scanHref(view) }
@@ -30,7 +30,7 @@ export function parseRoute(hash: string): Route {
   // 旧书签中的重置筛选仍对应同一批已中止任务。
   if (params.get('status') === 'reset') params.set('status', 'stopped')
   if (params.get('status') === 'resetting') params.set('status', 'stopping')
-  if (path === '/scan-history') return { page: 'scanHistory', view: { scope: ['market', 'watchlist'].includes(params.get('scope') ?? '') ? params.get('scope') as ScanScope : 'all', status: jobStatuses.includes(params.get('status') ?? '') ? params.get('status')! : 'all', page: pageNumber(params.get('page')) } }
+  if (path === '/scan-history') return { page: 'scanHistory', view: { scope: ['batch', 'market', 'watchlist'].includes(params.get('scope') ?? '') ? params.get('scope') as ScanHistoryView['scope'] : 'all', status: jobStatuses.includes(params.get('status') ?? '') ? params.get('status')! : 'all', page: pageNumber(params.get('page')) } }
   if (path?.startsWith('/scans/')) {
     const id = path.slice('/scans/'.length)
     if (validId(id)) return { page: 'scanTask', id, view: taskView(params), from: taskSource(params.get('from') ?? '#/scan-history') }
@@ -49,7 +49,7 @@ export function parseRoute(hash: string): Route {
   return { page: 'workbench', symbol: (params.get('symbol') ?? '').slice(0, 12) }
 }
 
-export const scanHref = (view: ScanView = { scope: 'watchlist' }) => `#/scans?${new URLSearchParams({ scope: view.scope })}`
+export const scanHref = (view: ScanView = { scope: 'batch' }) => `#/scans?${new URLSearchParams({ scope: view.scope })}`
 export function scanHistoryHref(view: ScanHistoryView = { scope: 'all', status: 'all', page: 0 }): string {
   const params = new URLSearchParams()
   if (view.scope !== 'all') params.set('scope', view.scope)

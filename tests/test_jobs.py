@@ -13,16 +13,19 @@ def finish(manager):
     assert not manager.thread.is_alive()
 
 
-def test_full_scan_filters_only_foundation_and_evaluates_every_eligible_stock(engine):
+def test_batch_filters_only_foundation_and_evaluates_each_listed_stock(engine):
     calls = enable_model(engine)
     manager = JobManager(engine)
-    job = manager.start()
+    job = manager.start(["600000", "000001", "600001"])
     finish(manager)
     result = manager.get(job["id"])
     assert result["status"] == "completed"
     assert (result["total"], result["completed"], result["skipped"]) == (3, 2, 1)
     assert len(calls) == 2
-    assert engine.store.get(engine.breadth_key(date(2026, 9, 18)))["coverage"] == 1
+    assert engine.store.get(engine.breadth_key(date(2026, 9, 18))) is None
+    assert engine.provider.calls == 2
+    assert result["scope"] == "batch"
+    assert [item["stock"]["symbol"] for item in result["items"]] == ["600000.SH", "000001.SZ", "600001.SH"]
 
 
 def test_breadth_cache_is_scoped_to_universe(engine):
@@ -49,7 +52,7 @@ def test_cross_manager_lock_and_pause_resume(engine, monkeypatch):
     assert second.get(job["id"])["status"] == "running"
     assert second.is_running()
     with pytest.raises(AnalysisError) as exc:
-        second.start()
+        second.start(["000001"])
     assert exc.value.code == "job_active"
     second.pause(job["id"])
     release.set()
@@ -181,7 +184,7 @@ def test_stop_running_job_across_managers_stops_after_current_stock(engine, monk
         assert second.stop(job["id"])["status"] == "stopping"
         assert second.is_running()
         with pytest.raises(AnalysisError) as exc:
-            second.start()
+            second.start(["000001"])
         assert exc.value.code == "job_active"
     finally:
         release.set()

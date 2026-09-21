@@ -8,7 +8,7 @@ import time
 import uuid
 from contextlib import contextmanager
 
-from .models import AnalysisError, Stock
+from .models import AnalysisError, Stock, normalize_symbols
 
 ACTIVE_STATUSES = ("running", "preparing", "pausing", "stopping", "resetting")
 LEGACY_STATUSES = {"resetting": "stopping", "reset": "stopped"}
@@ -126,14 +126,17 @@ class JobManager:
         with self.lock, self._history_guard():
             return self.engine.store.restore_records("job", token)
 
-    def start(self, symbols: list[str] | None = None) -> dict:
+    def start(self, symbols: str | list[str] | None = None, *, scope="batch") -> dict:
+        if scope not in ("batch", "watchlist"):
+            raise AnalysisError("invalid_scope", "请选择股票列表或自选股。", "Choose a stock list or watchlist.")
+        symbols = normalize_symbols(symbols)
         if not self.engine.settings.jev_api_key.get_secret_value():
             raise AnalysisError("needs_key", "批量扫描前请先配置 Jev API key。", "Configure a Jev API key before starting a batch scan.")
         with self.lock:
             if self.active or not self._acquire():
                 raise AnalysisError("job_active", "已有扫描正在运行，请先暂停。", "A scan is already running; pause it first.")
             identifier = uuid.uuid4().hex[:16]
-            job = {"id": identifier, "created": time.time(), "status": "preparing", "phase": "preparing", "scope": "market" if symbols is None else "watchlist", "symbols": symbols, "items": [], "as_of": None, "error": None, "configuration": self._configuration()}
+            job = {"id": identifier, "created": time.time(), "status": "preparing", "phase": "preparing", "scope": scope, "symbols": symbols, "items": [], "as_of": None, "error": None, "configuration": self._configuration(), "current_symbol": None}
             self.jobs[identifier] = job
             self.active = identifier
             self._save(job)
@@ -155,6 +158,9 @@ class JobManager:
             job = self._read(identifier)
             if job["status"] in ("stopping", "stopped") or self._stop_requested(identifier):
                 raise AnalysisError("job_stopped", "该任务已中止或正在中止，不能继续或重试。请开始新的扫描。", "This job is stopped or stopping and cannot be resumed or retried. Start a new scan.")
+            if job["scope"] == "market":
+                raise AnalysisError("market_scan_removed", "全市场扫描已停用。历史结果保留，请用股票列表新建批量任务。", "Full-market scanning has been retired. History is preserved; start a new stock-list batch.")
+            normalize_symbols(job.get("symbols"))
             if job.get("configuration") != self._configuration():
                 raise AnalysisError("job_config_changed", "分析配置已变化，请新建扫描任务。", "Analysis configuration changed; start a new scan.")
             if not self.engine.settings.jev_api_key.get_secret_value():
@@ -166,7 +172,7 @@ class JobManager:
             if retry_failed:
                 for item in job["items"]:
                     if item["status"] == "failed":
-                        item.update(status="pending", data_status="pending", error=None, analysis_id=None)
+                        item.update(status="pending", data_status="pending", error=None, analysis_id=None, action=None, horizon=None)
             job["status"], job["error"] = "running", None
             self.active = identifier
             self._save(job)
@@ -218,64 +224,70 @@ class JobManager:
                 raise AnalysisError("job_expired", "扫描的截止交易日已变化，请创建新任务，避免混用不同时点。", "The completed trading date has changed. Start a new scan to avoid mixing cutoffs.")
             job["as_of"] = cutoff.isoformat()
             if not job["items"]:
-                stocks = self.engine.provider.universe()
+                stocks = {stock.symbol: stock for stock in self.engine.provider.universe()}
                 if self._paused(job):
                     return
-                if job["symbols"] is not None:
-                    wanted = set(job["symbols"])
-                    stocks = [stock for stock in stocks if stock.symbol in wanted]
-                    if len(stocks) != len(wanted):
-                        raise AnalysisError("unknown_stock", "部分自选股票不在当前 A 股名单中。", "Some watchlist stocks are absent from the current universe.")
-                job["items"] = [{"stock": stock.model_dump(), "data_status": "pending", "status": "pending", "analysis_id": None, "error": None} for stock in stocks]
+                job["items"] = []
+                for symbol in job["symbols"]:
+                    stock = stocks.get(symbol)
+                    error = None if stock else {"code": "unknown_stock", "zh": "股票不在当前 A 股名单中。", "en": "The stock is not in the current A-share universe."}
+                    job["items"].append({"stock": (stock or Stock(symbol=symbol, name=symbol, market=symbol[-2:])).model_dump(),
+                                         "data_status": "failed" if error else "pending", "status": "failed" if error else "pending",
+                                         "analysis_id": None, "error": error, "unresolved": stock is None})
+            unresolved = [item for item in job["items"] if item.get("unresolved") and item["status"] == "pending"]
+            if unresolved:
+                stocks = {stock.symbol: stock for stock in self.engine.provider.universe()}
+                for item in unresolved:
+                    stock = stocks.get(item["stock"]["symbol"])
+                    if stock:
+                        item.update(stock=stock.model_dump(), unresolved=False)
+                    else:
+                        item.update(status="failed", data_status="failed", error={"code": "unknown_stock", "zh": "股票不在当前 A 股名单中。", "en": "The stock is not in the current A-share universe."})
             if self._paused(job):
                 return
-            job["status"], job["phase"] = "running", "data"
+            job["status"] = "running"
             self._save(job)
-            for item in job["items"]:
-                if self._paused(job):
-                    return
-                if item["data_status"] != "pending":
-                    continue
-                stock = Stock.model_validate(item["stock"])
-                try:
-                    self.engine.filter_stock(stock)
-                    frame, _ = self.engine.provider.bars(stock.symbol, cutoff)
-                    self.engine.check_frame(frame, cutoff)
-                    item["above_ma20"] = bool(frame.close.iloc[-1] > frame.close.tail(20).mean())
-                    item["data_status"] = "ready"
-                except AnalysisError as exc:
-                    filtered = exc.code in ("special_filtered", "market_filtered", "suspended", "insufficient_history", "liquidity_filtered")
-                    item["data_status"], item["status"] = "skipped" if filtered else "failed", "skipped" if filtered else "failed"
-                    item["error"] = {"code": exc.code, "zh": exc.zh, "en": exc.en}
-                self._save(job)
-            if self._paused(job):
-                return
-            if job["scope"] == "market":
-                eligible = [item for item in job["items"] if item["status"] != "skipped"]
-                valid = [item for item in eligible if item["data_status"] == "ready"]
-                if valid:
-                    self.engine.store.put(self.engine.breadth_key(cutoff), {"as_of": cutoff.isoformat(), "coverage": len(valid) / max(1, len(eligible)), "above_ma20_pct": 100 * sum(item["above_ma20"] for item in valid) / len(valid), "sample": len(valid)})
-            job["phase"] = "analysis"
-            self._save(job)
+            data_failures = 0
             for item in job["items"]:
                 if self._paused(job):
                     return
                 if item["status"] != "pending":
                     continue
                 stock = Stock.model_validate(item["stock"])
+                job["current_symbol"], job["phase"] = stock.symbol, "data"
+                self._save(job)
                 try:
-                    analysis = self.engine.analyze(stock.symbol, stock=stock, pinned_context=(sessions, cutoff))
+                    self.engine.filter_stock(stock)
+                    market_data = self.engine.provider.bars(stock.symbol, cutoff)
+                    self.engine.check_frame(market_data[0], cutoff)
+                    item["data_status"] = "ready"
+                    self._save(job)
+                    if self._paused(job):
+                        return
+                    job["phase"] = "analysis"
+                    self._save(job)
+                    analysis = self.engine.analyze(stock.symbol, stock=stock, pinned_context=(sessions, cutoff), market_data=market_data)
+                    data_failures = 0
                     item["analysis_id"] = analysis.id
                     item["status"] = "ready" if analysis.status == "ready" else "failed"
                     item["action"], item["horizon"] = analysis.action, analysis.horizon
                     if analysis.status != "ready":
                         item["error"] = analysis.notices[-1]
-                        # 认证或模型故障不会对整张股票表重复付费重试。
+                        # 第一只的模型故障立即暂停，不继续下载其他股票或重复调用模型。
                         job["status"], job["error"] = "paused", item["error"]
                         self._save(job)
                         return
                 except AnalysisError as exc:
-                    item["status"], item["error"] = "failed", {"code": exc.code, "zh": exc.zh, "en": exc.en}
+                    filtered = exc.code in ("special_filtered", "market_filtered", "suspended", "insufficient_history", "liquidity_filtered")
+                    item["data_status"] = item["status"] = "skipped" if filtered else "failed"
+                    item["error"] = {"code": exc.code, "zh": exc.zh, "en": exc.en}
+                    data_failures = 0 if filtered else data_failures + 1
+                    if data_failures >= 3 and any(row["status"] == "pending" for row in job["items"]):
+                        job["status"] = "paused"
+                        job["error"] = {"code": "consecutive_data_failures", "zh": "连续 3 只股票的数据处理失败，已暂停。请查看失败原因，修复后重试。", "en": "Data processing failed for 3 consecutive stocks. Paused; review the errors and retry after fixing the cause."}
+                        self._save(job)
+                        return
+                job["current_symbol"] = None
                 self._save(job)
             if self._paused(job):
                 return
@@ -295,8 +307,12 @@ class JobManager:
                 try:
                     self._paused(job)
                 finally:
-                    self.active = None
-                    self._release()
+                    try:
+                        job["current_symbol"] = None
+                        self._save(job)
+                    finally:
+                        self.active = None
+                        self._release()
 
     def shutdown(self):
         if self.active:

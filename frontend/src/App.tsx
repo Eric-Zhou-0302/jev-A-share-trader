@@ -33,6 +33,7 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [busy, setBusy] = useState(false)
   const [scanStarting, setScanStarting] = useState(false)
+  const [batchInput, setBatchInput] = useState('')
   const [createdScan, setCreatedScan] = useState<Job | null>(null)
   const [error, setError] = useState('')
   const selectionRequest = useRef<AbortController | null>(null)
@@ -92,14 +93,14 @@ export default function App() {
     if (samePage) navigate(from, { replace: true, scroll: returnScroll })
     navigate(scanTaskHref(id, undefined, from), { returnScroll })
   }
-  async function startScan(scope: ScanScope) {
+  async function startScan(scope: ScanScope, symbols?: string[]) {
     if (scanStarting) return
     const started = navigation.state.key
     const from = scanHref({ scope })
     const returnScroll = window.scrollY
     setScanStarting(true); setError(''); setCreatedScan(null)
     try {
-      const job = await api<Job>('/jobs', lang, { scope })
+      const job = await api<Job>('/jobs', lang, { scope, symbols })
       if (currentNavigation.current.state.key === started) navigate(scanTaskHref(job.id, undefined, from), { returnScroll })
       else setCreatedScan(job)
     } catch (value) { setError((value as Error).message) }
@@ -161,7 +162,7 @@ export default function App() {
         {route.page === 'workbench' && <AnalysisEntry key={route.symbol} lang={lang} initialSymbol={route.symbol} settings={settings} busy={busy} onAnalyze={analyze} onConfigure={() => setSettingsOpen(true)}/>}
         {route.page === 'report' && <Report key={route.id} id={route.id} lang={lang} initial={reportCache} busy={busy} returnLabel={returnLabel} onBack={() => navigate(route.from, { scroll: navigation.state.returnScroll })} onAnalyze={analyze} onConfigure={() => setSettingsOpen(true)} onLoaded={setViewedReport} onReady={onReady}/>}
         {createdScan && <div className="analysis-loading" role="status"><span>{t('scanStarted')}</span><button className="text-button" onClick={() => openTask(createdScan.id, scanHref({ scope: createdScan.scope as ScanScope }))}>{t('viewScanTask')} →</button></div>}
-        {route.page === 'scans' && <Scans lang={lang} configured={settings?.jev_configured ?? false} busy={scanStarting} view={route.view} onChange={view => navigate(scanHref(view), { replace: true, scroll: window.scrollY })} onStart={() => startScan(route.view.scope)} onTask={openTask} onConfigure={() => setSettingsOpen(true)} onReady={onReady}/>}
+        {route.page === 'scans' && <Scans lang={lang} configured={settings?.jev_configured ?? false} busy={scanStarting} view={route.view} input={batchInput} onInput={setBatchInput} watchlist={watchlist} onChange={view => navigate(scanHref(view), { replace: true, scroll: window.scrollY })} onStart={symbols => startScan(route.view.scope, symbols)} onTask={openTask} onConfigure={() => setSettingsOpen(true)} onReady={onReady}/>}
         {route.page === 'scanHistory' && <ScanHistory lang={lang} view={route.view} onChange={view => navigate(scanHistoryHref(view), { replace: true, scroll: window.scrollY })} onTask={openTask} onReady={onReady}/>}
         {route.page === 'scanTask' && <ScanTask key={route.id} id={route.id} from={route.from} lang={lang} view={route.view} returnLabel={returnLabel} onBack={() => navigate(route.from, { scroll: navigation.state.returnScroll })} onChange={view => navigate(scanTaskHref(route.id, view, route.from), { replace: true, scroll: window.scrollY, returnScroll: navigation.state.returnScroll })} onOpen={open} onTask={openTask} onReady={onReady}/>}
         {route.page === 'history' && <History lang={lang} view={route.view} onChange={view => navigate(historyHref(view), { replace: true, scroll: window.scrollY })} onOpen={open} onReady={onReady} onChanged={() => { setReportCache(null); setCompletedElsewhere(null); void reload() }}/>}

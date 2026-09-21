@@ -224,7 +224,7 @@ def test_tushare_end_to_end_through_engine(engine, bars, monkeypatch):
     assert result.status == "ready" and result.source.startswith("Tushare")
     assert result.rows == 520 and "relative" in result.groups_available
     assert {"daily", "adj_factor", "daily_basic", "index_daily", "index_member_all", "sw_daily"}.issubset(endpoints)
-    assert result.notices == [{"code": "breadth_missing", "zh": "市场宽度将在全市场行情同步后生成；本次未使用。", "en": "Market breadth requires a full-universe data sync and is not used in this analysis."}]
+    assert result.notices == [{"code": "breadth_missing", "zh": "缺少同日全市场宽度数据；本次未使用，也不会用股票列表估算。", "en": "Same-day market breadth is unavailable and is not used or estimated from the stock list."}]
     assert "test-only" not in json.dumps(result.model_dump()) + json.dumps(model_calls)
 
 

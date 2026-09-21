@@ -27,7 +27,8 @@ class AnalyzeInput(BaseModel):
 
 
 class ScanInput(BaseModel):
-    scope: Literal["market", "watchlist"] = "watchlist"
+    scope: Literal["batch", "watchlist"] = "batch"
+    symbols: str | list[Annotated[str, Field(max_length=32)]] | None = Field(default=None, max_length=20000)
 
 
 class WatchInput(BaseModel):
@@ -208,13 +209,15 @@ def create_app(directory: Path | None = None, supplied_engine=None) -> FastAPI:
 
     @app.post("/api/jobs")
     def start_scan(body: ScanInput):
-        symbols = [stock["symbol"] for stock in engine.store.watchlist()] if body.scope == "watchlist" else None
-        if symbols == []:
+        if body.scope == "watchlist" and body.symbols is not None:
+            raise AnalysisError("invalid_scope", "自选股扫描不接受额外列表，请选择股票列表。", "Use the stock-list scope to submit symbols.")
+        symbols = [stock["symbol"] for stock in engine.store.watchlist()] if body.scope == "watchlist" else body.symbols
+        if body.scope == "watchlist" and not symbols:
             raise AnalysisError("empty_watchlist", "请先添加自选股。", "Add stocks to the watchlist first.")
-        return manager.start(symbols)
+        return manager.start(symbols, scope=body.scope)
 
     @app.get("/api/jobs/search")
-    def scan_history(scope: Literal["all", "market", "watchlist"] = "all",
+    def scan_history(scope: Literal["all", "batch", "market", "watchlist"] = "all",
                      status: Literal["all", "preparing", "running", "pausing", "paused", "completed", "partial", "failed", "stopping", "stopped", "resetting", "reset"] = "all",
                      page: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100)):
         return manager.search(scope, status, page, limit)

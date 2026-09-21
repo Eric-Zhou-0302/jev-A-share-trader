@@ -3,7 +3,7 @@ import test from 'node:test'
 import { analysisHref, historyHref, parseRoute, reportHref, scanHref, scanHistoryHref, scanTaskHref } from '../src/routes.ts'
 
 test('scan entry contains only its selected universe', () => {
-  assert.deepEqual(parseRoute(scanHref({ scope: 'market' })), { page: 'scans', view: { scope: 'market' } })
+  assert.deepEqual(parseRoute(scanHref({ scope: 'batch' })), { page: 'scans', view: { scope: 'batch' } })
 })
 test('report links preserve both scan task state and its filtered history source', () => {
   const history = { scope: 'market', status: 'completed', page: 3 }
@@ -17,7 +17,7 @@ test('report links preserve both scan task state and its filtered history source
 })
 test('legacy scan links still open their original task and result page', () => {
   assert.deepEqual(parseRoute('#/scans?scope=market&job=job-old&filter=ready&page=4'), {
-    page: 'scanTask', id: 'job-old', view: { filter: 'ready', page: 4 }, from: scanHref({ scope: 'market' }),
+    page: 'scanTask', id: 'job-old', view: { filter: 'ready', page: 4 }, from: scanHref({ scope: 'batch' }),
   })
 })
 test('history links preserve Chinese queries and both cutoff dates', () => {
@@ -41,7 +41,7 @@ test('external and recursive return destinations cannot hijack navigation', () =
   }
 })
 test('malformed filters and page numbers recover to usable defaults', () => {
-  assert.deepEqual(parseRoute('#/scans?scope=bad&filter=bad&page=-5'), { page: 'scans', view: { scope: 'watchlist' } })
+  assert.deepEqual(parseRoute('#/scans?scope=bad&filter=bad&page=-5'), { page: 'scans', view: { scope: 'batch' } })
   assert.deepEqual(parseRoute('#/scan-history?scope=bad&status=bad&page=Infinity').view, { scope: 'all', status: 'all', page: 0 })
   assert.deepEqual(parseRoute('#/scans/valid?filter=bad&page=-3').view, { filter: 'all', page: 0 })
   assert.equal(parseRoute('#/history?page=Infinity&from=oops').view.fromDate, '')

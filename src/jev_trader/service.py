@@ -70,16 +70,17 @@ class Engine:
         if self.settings.min_amount and (frame.amount.tail(20).isna().any() or frame.amount.tail(20).mean() < self.settings.min_amount):
             raise AnalysisError("liquidity_filtered", "成交额不足或缺失，未通过流动性过滤。", "Insufficient or missing turnover amount; liquidity filter failed.")
 
-    def analyze(self, symbol: str, technical_only=False, pinned_context=None, stock: Stock | None = None) -> Analysis:
+    def analyze(self, symbol: str, technical_only=False, pinned_context=None, stock: Stock | None = None, market_data=None) -> Analysis:
         # 配置修改和单次分析互斥，防止签名、模型与聚合规则来自不同快照。
         with self.analysis_lock:
-            return self._analyze(symbol, technical_only, pinned_context, stock)
+            return self._analyze(symbol, technical_only, pinned_context, stock, market_data)
 
-    def _analyze(self, symbol: str, technical_only=False, pinned_context=None, stock: Stock | None = None) -> Analysis:
+    def _analyze(self, symbol: str, technical_only=False, pinned_context=None, stock: Stock | None = None, market_data=None) -> Analysis:
         stock = stock or self.get_stock(symbol)
         self.filter_stock(stock)
         sessions, requested = pinned_context or self.context()
-        frame, source = self.provider.bars(stock.symbol, requested)
+        # 批量任务复用当前股票刚取得的行情，仍执行完整校验。
+        frame, source = market_data if market_data is not None else self.provider.bars(stock.symbol, requested)
         notices = list(frame.attrs.get("notices", []))
         frame = validate_bars(frame, requested)
         self.check_frame(frame, requested)
@@ -104,7 +105,7 @@ class Engine:
             notices.append(notice(exc.code, exc.zh, exc.en))
         breadth = self.store.get(self.breadth_key(requested))
         if not breadth:
-            notices.append(notice("breadth_missing", "市场宽度将在全市场行情同步后生成；本次未使用。", "Market breadth requires a full-universe data sync and is not used in this analysis."))
+            notices.append(notice("breadth_missing", "缺少同日全市场宽度数据；本次未使用，也不会用股票列表估算。", "Same-day market breadth is unavailable and is not used or estimated from the stock list."))
         technical = compute(frame, sessions, requested, reference, industry, breadth)
         if len(technical.charts["monthly"]) < 13:
             notices.append(notice("monthly_history", "完整月线不足 13 根，未使用月线趋势证据。", "Fewer than 13 completed monthly bars; monthly trend evidence is unavailable."))

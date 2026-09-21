@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 Language = Literal["zh", "en"]
 Action = Literal["buy", "hold", "sell"]
 GROUPS = ("trend", "momentum", "volume", "volatility", "structure", "candles", "multitimeframe", "relative")
+MAX_BATCH_SIZE = 50
 GROUP_NAMES = {
     "trend": ("趋势", "Trend"), "momentum": ("动量", "Momentum"),
     "volume": ("量价", "Volume"), "volatility": ("波动", "Volatility"),
@@ -43,6 +44,23 @@ def normalize_symbol(value: str) -> str:
     if any(part and part != market for part in (prefix, suffix)):
         raise AnalysisError("invalid_symbol", "股票代码与交易所不匹配。", "The symbol and exchange do not match.")
     return f"{code}.{market}"
+
+
+def normalize_symbols(value: str | list[str] | None) -> list[str]:
+    tokens = re.split(r"[\s,，;；、]+", value if isinstance(value, str) else " ".join(value or []))
+    symbols = []
+    for token in filter(None, tokens):
+        try:
+            symbol = normalize_symbol(token)
+        except AnalysisError as exc:
+            raise AnalysisError("invalid_symbol", f"无效股票代码：{token}。{exc.zh}", f"Invalid symbol: {token}. {exc.en}") from exc
+        if symbol not in symbols:
+            symbols.append(symbol)
+    if not symbols:
+        raise AnalysisError("empty_batch", "请至少输入一只股票。", "Enter at least one stock.")
+    if len(symbols) > MAX_BATCH_SIZE:
+        raise AnalysisError("batch_too_large", f"每批最多 {MAX_BATCH_SIZE} 只股票，请拆分列表。", f"Each batch supports at most {MAX_BATCH_SIZE} stocks. Split the list into smaller batches.")
+    return symbols
 
 
 class Stock(BaseModel):

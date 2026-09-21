@@ -103,7 +103,7 @@ def test_local_write_guard_and_error_localization(engine):
         assert client.get("/api/health", headers={"Host": "attacker.example"}).status_code == 400
         error = client.post("/api/analyze?lang=en", json={"symbol": "invalid"})
         assert error.status_code == 422 and "six-digit" in error.json()["message"]
-        assert client.post("/api/jobs", json={"scope": "market"}).json()["code"] == "needs_key"
+        assert client.post("/api/jobs", json={"scope": "batch", "symbols": ["000001"]}).json()["code"] == "needs_key"
 
 
 def test_export_escaping_and_bilingual_evidence(engine):
